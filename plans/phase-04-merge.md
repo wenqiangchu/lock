@@ -9,7 +9,7 @@
 ## 2. 实现方式
 
 - 输入为按 product 锚点对齐且结构一致的内存数组：签出快照 Base、本地当前值 Local、提交时读取的最新共享值 Remote，以及声明列集合。锚点列值用于确定同一业务行，不参与写回；锚点唯一性依赖业务前置条件，不重复检测。
-- 对每个声明单元格按规则处理：Local=Base 时取 Remote；Remote=Base 时取 Local；Local=Remote 时取共同值；三者均不同则记录冲突并等待用户裁决。非声明列不参与结果写入集合。
+- 对每个声明单元格使用 `MdlInfra.CompareCellValues` 比较字符串/空白哨兵，再按规则处理：Local=Base 时取 Remote；Remote=Base 时取 Local；Local=Remote 时取共同值；三者均不同则记录冲突并等待用户裁决。非声明列不参与结果写入集合。
 - 冲突记录包含 sheet/行/列定位信息以及 Base、Local、Remote 三值；模块不生成 UI 字符串，也不持有 Excel 对象。
 - 冲突裁决输入是每个冲突单元格的 Local/Remote 选择。任何冲突未选择或选择非法时，返回“未完成”，结果不可提交；全部选择完成后生成最终数组。
 - 合并与裁决全程只在内存中进行。只有 `MdlSession` 确认全部裁决完成后，才可推进到写回阶段。
@@ -44,6 +44,6 @@ Private Function ClassifyCell(baseValue As Variant, localValue As Variant, remot
 
 ## 6. 风险与未决问题
 
-- 值比较规则沿用 Phase 3 的待确认约定；两阶段必须共享同一 `ValuesEqual` 语义，否则会出现 Diff 与 Merge 判定不一致。暂定类型敏感、无隐式转换。
+- 字符串与空白比较沿用 Phase 1 的 `MdlInfra.CompareCellValues`，确保 Diff/Merge 判定一致；非空非字符串和公式必须在 Excel 适配阶段拒绝。
 - **冲突 UI 的取消语义已确定：不写共享文件，保留本地会话和列锁。** 本模块只返回未完成裁决状态，不负责释放锁；需由 Phase 7 保证这个状态转移。
 - 格式属性不属于当前范围；未来若提出格式同步，须先修订总计划并明确格式级冲突和写回规则，再调整本阶段数据结构。

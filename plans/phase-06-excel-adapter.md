@@ -11,6 +11,7 @@
 - `MdlExcel` 使用宿主 Excel 实例，管理本地副本和共享主文件的打开句柄；句柄以内部 ID 暴露给上层，Excel 对象引用只保存在模块私有状态中。
 - 共享主文件复制到 `%LOCALAPPDATA%` 工作区，由 `MdlStorage` 执行文件操作。Base 快照从本地副本在签出时读取；提交时重新读取共享文件形成 Remote。
 - 读取表头后调用 `MdlSchema` 解析。用有界读取策略取得声明列、product 锚点值及目标行数组；按锚点关联 Base、Local、Remote 行，不以行号单独假定业务行相同。禁止 `Range.Find` 和 `UsedRange` 求边界。行边界方法需基于产品模板验证并记录。
+- 签出和提交前验证声明 AMG 列中没有公式，非空单元格均为字符串；发现公式或其他数据类型即中止并报告单元格位置。该检查仅针对本次声明列。
 - 提交前再次校验 sheet、表头/列名指纹、锚点列及其顺序/值映射、数组尺寸。若锚点被编辑、行增删/移动或结构不符，失败关闭，不进行写入。
 - 写回只针对会话声明的 AMG 列，按列逐个写入，不以 `Union` 操作非连续区域；写入后校验目标数据，再对共享工作簿调用 `Save()`。严禁 `SaveAs`。
 - 过程无论成功失败均通过 `Cleanup:` 恢复 `EnableEvents`/`ScreenUpdating` 等被改变的应用状态，并关闭本模块打开的工作簿；不挂单元格 `Change` 事件。
@@ -25,6 +26,7 @@
 Public Function OpenWorkbookHandle(path As String, role As WorkbookRole, ByRef handleId As String, ByRef err As AppErrorInfo) As Boolean
 Public Function ReadSheetSchema(handleId As String, sheetName As String, ByRef schema As SheetSchema, ByRef err As AppErrorInfo) As Boolean
 Public Function ReadDeclaredSnapshot(handleId As String, targets As Variant, ByRef snapshot As SnapshotData, ByRef err As AppErrorInfo) As Boolean
+Public Function ValidateEditableContents(handleId As String, targets As Variant, ByRef invalidCells As Variant, ByRef err As AppErrorInfo) As Boolean
 Public Function ValidateStructure(handleId As String, expected As SessionSchema, ByRef valid As Boolean, ByRef err As AppErrorInfo) As Boolean
 Public Function WriteDeclaredColumns(handleId As String, targets As Variant, mergedValues As Variant, ByRef err As AppErrorInfo) As Boolean
 Public Function SaveWorkbook(handleId As String, ByRef err As AppErrorInfo) As Boolean
@@ -50,6 +52,6 @@ Public Sub CloseWorkbookHandle(handleId As String, saveChanges As Boolean)
 
 - **实际数据行边界规则尚未定稿。** 暂定仅使用锚点列与受限数组扫描/经验证的边界 API，发现空洞或尺寸歧义即拒绝操作；需用代表性模板确认是否存在尾部空锚点、内部空行及最大行数。
 - **用户可能在本地副本误改 product 锚点。** 暂定提交校验发现锚点相对 Base 改变即拒绝提交并要求撤销，不会写回锚点列；需确认是否应明确以中文提示到具体位置。
-- **值、公式、错误值和空单元格的读取/写回语义需与 Phase 3/4 共用。** 暂按值模式处理，不转换数据类型；需在集成测试确定公式单元格的准入规则。
+- 空白单元格按 Phase 1 的 `Empty` 哨兵规则处理；公式和非字符串非空值在签出/提交守卫中拒绝。需用目标 Excel 验证批量读取后 `Empty` 与零长度字符串的区分行为。
 - **保存期间共享文件的其它访问行为及 `Save()` 失败后的结果可见性，须由 Phase 9 验证。** 不做提交前备份；结果不确定时由 Phase 7 保留会话和本地数据，不可直接清理。
 - `Application` 事件处理器若后续确需增加，必须遵守 `AGENTS.md` §4.5 的错误处理和 `mInCommit` 次序要求。
