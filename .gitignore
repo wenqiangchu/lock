@@ -30,3 +30,6 @@ venv/
 out/
 build/
 dist/
+
+# Chinese filename needs explicit un-ignore too
+!prepare/测试结果.xlsx
