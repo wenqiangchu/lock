@@ -1,0 +1,32 @@
+# ---- VBA / Office build artifacts ----
+*.xlsm
+*.xlsb
+*.xlam
+*.xlsx
+~$*
+*.tmp
+~DF*.tmp
+
+# Keep the reference workbook from the preparation phase
+!prepare/*.xlsx
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp
+
+# ---- Python (test drivers only) ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- Runtime output ----
+*.log
+*.csv
+*_report.txt
+out/
+build/
+dist/
