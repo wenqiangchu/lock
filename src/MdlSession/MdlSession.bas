@@ -56,7 +56,17 @@ Private mCanSubmit As Boolean
 Private mSaveResultUncertain As Boolean
 Private mStatusText As String
 
-Public Function BeginCheckout(ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function GetConfiguredWorkbookPaths(ByRef paths As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim config As AppConfig
+
+    paths = Empty
+    If Not ReadConfig(GetDefaultConfigPath(), config, errorInfo) Then Exit Function
+    paths = config.WorkbookPaths
+    GetConfiguredWorkbookPaths = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlSession.GetConfiguredWorkbookPaths", "")
+End Function
+
+Public Function BeginCheckout(ByVal workbookPath As String, ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim config As AppConfig
     Dim normalizedFile As String
     Dim normalizedTargets As Variant
@@ -76,7 +86,11 @@ Public Function BeginCheckout(ByRef targets As Variant, ByRef errorInfo As AppEr
     mSessionId = NewGuidString()
     If Len(mSessionId) = 0 Then GoTo Failed
     If Not ReadConfig(GetDefaultConfigPath(), config, errorInfo) Then GoTo Failed
-    If Not ValidateUncPath(config.MainFilePath, normalizedFile, errorInfo) Then GoTo Failed
+    If Not ValidateUncPath(workbookPath, normalizedFile, errorInfo) Then GoTo Failed
+    If Not IsConfiguredWorkbookPath(config.WorkbookPaths, normalizedFile) Then
+        errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.BeginCheckout", "The selected workbook is no longer in the configuration list. Reload the list and select a configured workbook.", normalizedFile)
+        GoTo Failed
+    End If
     If Not NormalizeTargets(targets, normalizedFile, normalizedTargets, errorInfo) Then GoTo Failed
     If Not BuildTargetGroups(normalizedTargets, groupNames, groupTargets, groupCount, errorInfo) Then GoTo Failed
     mTargets = normalizedTargets
@@ -125,7 +139,7 @@ Failed:
     RollbackCheckout errorCleanup
 End Function
 
-Public Function GetAvailableTargets(ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function GetAvailableTargets(ByVal workbookPath As String, ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim config As AppConfig
     Dim normalizedFile As String
     Dim handleId As String
@@ -145,7 +159,11 @@ Public Function GetAvailableTargets(ByRef targets As Variant, ByRef errorInfo As
 
     targets = Empty
     If Not ReadConfig(GetDefaultConfigPath(), config, errorInfo) Then Exit Function
-    If Not ValidateUncPath(config.MainFilePath, normalizedFile, errorInfo) Then Exit Function
+    If Not ValidateUncPath(workbookPath, normalizedFile, errorInfo) Then Exit Function
+    If Not IsConfiguredWorkbookPath(config.WorkbookPaths, normalizedFile) Then
+        errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.GetAvailableTargets", "The selected workbook is not in the configuration list.", normalizedFile)
+        Exit Function
+    End If
     If Not OpenWorkbookHandle(normalizedFile, WorkbookSharedRemote, handleId, errorInfo) Then Exit Function
     On Error GoTo Failed
     If Not ListWorksheetNames(handleId, sheetNames, errorInfo) Then GoTo Cleanup
@@ -193,6 +211,22 @@ Failed:
 
 Cleanup:
     If Len(handleId) > 0 Then CloseWorkbookHandle handleId, False
+End Function
+
+Private Function IsConfiguredWorkbookPath(ByRef workbookPaths As Variant, ByVal normalizedPath As String) As Boolean
+    Dim index As Long
+
+    On Error GoTo InvalidList
+    If Not IsArray(workbookPaths) Then Exit Function
+    For index = LBound(workbookPaths) To UBound(workbookPaths)
+        If StrComp(CStr(workbookPaths(index)), normalizedPath, vbTextCompare) = 0 Then
+            IsConfiguredWorkbookPath = True
+            Exit Function
+        End If
+    Next index
+
+InvalidList:
+    Err.Clear
 End Function
 
 Public Function SubmitChanges(ByRef conflicts As Variant, ByRef errorInfo As AppErrorInfo) As SubmitOutcome

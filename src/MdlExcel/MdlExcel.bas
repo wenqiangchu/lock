@@ -37,6 +37,9 @@ Public Const ERR_EXCEL_INVALID_CONTENTS As Long = 1604
 Public Const ERR_EXCEL_ORPHAN_DATA As Long = 1605
 Public Const ERR_EXCEL_STRUCTURE As Long = 1606
 Public Const ERR_EXCEL_IO As Long = 1607
+Public Const ERR_EXCEL_FILE_MISSING As Long = 1608
+Public Const ERR_EXCEL_ACCESS_DENIED As Long = 1609
+Public Const ERR_EXCEL_NETWORK_UNAVAILABLE As Long = 1610
 
 Private Const XL_UP As Long = -4162
 Private Const XL_CELL_TYPE_FORMULAS As Long = -4123
@@ -78,6 +81,9 @@ End Sub
 
 Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookRole, ByRef handleId As String, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim normalizedPath As String
+    Dim pathStatus As SharedPathStatus
+    Dim systemError As Long
+    Dim pathError As AppErrorInfo
     Dim workbook As Workbook
     Dim candidate As Workbook
     Dim entry As CWorkbookHandle
@@ -91,6 +97,24 @@ Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookR
             If Not IsLocalAppDataPath(normalizedPath) Then GoTo InvalidPath
         Case WorkbookSharedRemote
             If Not ValidateUncPath(path, normalizedPath, errorInfo) Then Exit Function
+            If Not InspectUncPath(normalizedPath, pathStatus, systemError, pathError) Then
+                errorInfo = pathError
+                Exit Function
+            End If
+            Select Case pathStatus
+                Case SharedPathNotFound
+                    errorInfo = MakeAppError(ERR_EXCEL_FILE_MISSING, "MdlExcel.OpenWorkbookHandle", "The configured workbook file or folder was not found.", normalizedPath)
+                    Exit Function
+                Case SharedPathAccessDenied
+                    errorInfo = MakeAppError(ERR_EXCEL_ACCESS_DENIED, "MdlExcel.OpenWorkbookHandle", "Access to the configured workbook was denied.", normalizedPath & " (Windows error " & CStr(systemError) & ")")
+                    Exit Function
+                Case SharedPathNetworkUnavailable
+                    errorInfo = MakeAppError(ERR_EXCEL_NETWORK_UNAVAILABLE, "MdlExcel.OpenWorkbookHandle", "The network location for the configured workbook is unavailable.", normalizedPath & " (Windows error " & CStr(systemError) & ")")
+                    Exit Function
+                Case SharedPathIsDirectory
+                    errorInfo = MakeAppError(ERR_EXCEL_INVALID_INPUT, "MdlExcel.OpenWorkbookHandle", "The configured path identifies a folder, not a workbook file.", normalizedPath)
+                    Exit Function
+            End Select
         Case Else
             GoTo InvalidPath
     End Select
@@ -105,7 +129,7 @@ Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookR
     Set workbook = Application.Workbooks.Open(Filename:=normalizedPath, UpdateLinks:=0, ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
     If workbook.ReadOnly Then
         workbook.Close SaveChanges:=False
-        errorInfo = MakeAppError(ERR_EXCEL_HANDLE, "MdlExcel.OpenWorkbookHandle", "The workbook opened read-only and cannot be used for this session.", normalizedPath)
+        errorInfo = MakeAppError(ERR_EXCEL_HANDLE, "MdlExcel.OpenWorkbookHandle", "Excel opened the workbook read-only, so editing cannot start. It may be locked by another Excel session, read-only, or unavailable for writing under your account.", normalizedPath)
         Exit Function
     End If
 
@@ -121,7 +145,7 @@ Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookR
     Exit Function
 
 InvalidPath:
-    errorInfo = MakeAppError(ERR_EXCEL_INVALID_INPUT, "MdlExcel.OpenWorkbookHandle", "A local path below LOCALAPPDATA or a UNC shared path is required.", path)
+    errorInfo = MakeAppError(ERR_EXCEL_INVALID_INPUT, "MdlExcel.OpenWorkbookHandle", "A local path below LOCALAPPDATA or a configured UNC shared path is required.", path)
     Exit Function
 
 Failed:

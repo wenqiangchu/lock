@@ -14,31 +14,40 @@ Private WithEvents mCancelButton As MSForms.CommandButton
 Private mForm As Object
 Private mListBox As MSForms.ListBox
 Private mAccepted As Boolean
+Private mSelectedIndex As Long
+Private mEmptySelectionMessage As String
 
-Public Sub Bind(ByVal formObject As Object, ByVal listBox As Object, ByVal acceptButton As Object, ByVal cancelButton As Object)
+Public Sub Bind(ByVal formObject As Object, ByVal listBox As Object, ByVal acceptButton As Object, ByVal cancelButton As Object, ByVal emptySelectionMessage As String)
     Set mForm = formObject
     Set mListBox = listBox
     Set mAcceptButton = acceptButton
     Set mCancelButton = cancelButton
     mAccepted = False
+    mSelectedIndex = -1
+    mEmptySelectionMessage = emptySelectionMessage
 End Sub
 
 Public Property Get Accepted() As Boolean
     Accepted = mAccepted
 End Property
 
+Public Property Get SelectedIndex() As Long
+    SelectedIndex = mSelectedIndex
+End Property
+
 Private Sub mAcceptButton_Click()
     Dim itemIndex As Long
     Dim anySelected As Boolean
 
+    mSelectedIndex = -1
     For itemIndex = 0 To mListBox.ListCount - 1
         If mListBox.Selected(itemIndex) Then
             anySelected = True
-            Exit For
+            If mSelectedIndex < 0 Then mSelectedIndex = itemIndex
         End If
     Next itemIndex
     If Not anySelected Then
-        MsgBox "Select at least one AMG column.", vbInformation, "No Targets Selected"
+        MsgBox mEmptySelectionMessage, vbInformation, "Selection Required"
         Exit Sub
     End If
     mAccepted = True

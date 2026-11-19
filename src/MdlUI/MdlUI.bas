@@ -41,30 +41,122 @@ Public Function IsRibbonButtonEnabled(ByVal buttonId As String, ByRef view As Se
 End Function
 
 Public Sub RibbonStartEdit(ByVal control As IRibbonControl)
+    Dim workbookPaths As Variant
+    Dim workbookPath As String
     Dim availableTargets As Variant
     Dim selectedTargets As Variant
     Dim errorInfo As AppErrorInfo
 
     On Error GoTo Failed
-    If Not GetAvailableTargets(availableTargets, errorInfo) Then GoTo ShowError
+    If Not GetConfiguredWorkbookPaths(workbookPaths, errorInfo) Then GoTo ShowError
+    If Not ShowWorkbookSelector(workbookPaths, workbookPath) Then Exit Sub
+    If Not GetAvailableTargets(workbookPath, availableTargets, errorInfo) Then GoTo ShowError
     If IsEmpty(availableTargets) Then
         MsgBox "No editable AMG columns are available.", vbInformation, "MDDT Collaboration"
         Exit Sub
     End If
     If Not ShowTargetSelector(availableTargets, selectedTargets) Then Exit Sub
-    If Not BeginCheckout(selectedTargets, errorInfo) Then GoTo ShowError
+    If Not BeginCheckout(workbookPath, selectedTargets, errorInfo) Then GoTo ShowError
     InvalidateRibbon
     MsgBox "The local working copy is open. You can start editing.", vbInformation, "MDDT Collaboration"
     Exit Sub
 
 ShowError:
-    MsgBox errorInfo.Message, vbExclamation, "Unable to Start Editing"
+    If Len(errorInfo.Context) > 0 Then
+        MsgBox errorInfo.Message & vbCrLf & errorInfo.Context, vbExclamation, "Unable to Start Editing"
+    Else
+        MsgBox errorInfo.Message, vbExclamation, "Unable to Start Editing"
+    End If
     Exit Sub
 
 Failed:
     LogWrite LogError, "MdlUI.RibbonStartEdit", CStr(Err.Number) & ": " & Err.Description
     MsgBox "An error occurred while starting the edit session. Check the log and session state.", vbExclamation, "Unable to Start Editing"
 End Sub
+
+Private Function ShowWorkbookSelector(ByRef paths As Variant, ByRef selectedPath As String) As Boolean
+    Dim form As Object
+    Dim listBox As Object
+    Dim heading As Object
+    Dim acceptButton As Object
+    Dim cancelButton As Object
+    Dim handlers As CTargetSelectorEvents
+    Dim lowerBound As Long
+    Dim upperBound As Long
+    Dim index As Long
+
+    selectedPath = vbNullString
+    On Error GoTo Failed
+    If Not GetVectorBounds(paths, lowerBound, upperBound) Then Exit Function
+
+    Set form = CreateObject("Forms.UserForm.1")
+    With form
+        .Caption = "Select Workbook"
+        .Width = TARGET_FORM_WIDTH
+        .Height = TARGET_FORM_HEIGHT
+        .StartUpPosition = 1
+    End With
+    Set heading = form.Controls.Add("Forms.Label.1", "lblWorkbookHeading", True)
+    With heading
+        .Caption = "Select one configured shared workbook (UNC path)."
+        .Left = 12
+        .Top = 10
+        .Width = 640
+        .Height = 20
+    End With
+    Set listBox = form.Controls.Add("Forms.ListBox.1", "lstWorkbooks", True)
+    With listBox
+        .Left = 12
+        .Top = 34
+        .Width = 640
+        .Height = 320
+        .ColumnCount = 1
+        .ColumnWidths = "620 pt"
+        .MultiSelect = 0
+    End With
+    For index = lowerBound To upperBound
+        listBox.AddItem CStr(paths(index))
+    Next index
+
+    Set acceptButton = form.Controls.Add("Forms.CommandButton.1", "cmdWorkbookAccept", True)
+    With acceptButton
+        .Caption = "Continue"
+        .Left = 424
+        .Top = 366
+        .Width = 105
+        .Height = 28
+        .Default = True
+    End With
+    Set cancelButton = form.Controls.Add("Forms.CommandButton.1", "cmdWorkbookCancel", True)
+    With cancelButton
+        .Caption = "Cancel"
+        .Left = 544
+        .Top = 366
+        .Width = 105
+        .Height = 28
+        .Cancel = True
+    End With
+    Set handlers = New CTargetSelectorEvents
+    handlers.Bind form, listBox, acceptButton, cancelButton, "Select one workbook from the list."
+    form.Show 1
+    If Not handlers.Accepted Then GoTo Cleanup
+    selectedPath = CStr(listBox.List(handlers.SelectedIndex))
+    ShowWorkbookSelector = (Len(selectedPath) > 0)
+    GoTo Cleanup
+
+Failed:
+    selectedPath = vbNullString
+    LogWrite LogError, "MdlUI.ShowWorkbookSelector", CStr(Err.Number) & ": " & Err.Description
+    MsgBox "Unable to open the workbook selector. Checkout was not started.", vbExclamation, "Unable to Select Workbook"
+
+Cleanup:
+    On Error Resume Next
+    Set handlers = Nothing
+    If Not form Is Nothing Then form.Hide
+    Set listBox = Nothing
+    Set form = Nothing
+    On Error GoTo 0
+End Function
 
 Public Sub RibbonSubmit(ByVal control As IRibbonControl)
     Dim outcome As SubmitOutcome
@@ -280,7 +372,7 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
         .Cancel = True
     End With
     Set handlers = New CTargetSelectorEvents
-    handlers.Bind form, listBox, acceptButton, cancelButton
+    handlers.Bind form, listBox, acceptButton, cancelButton, "Select at least one AMG column."
     form.Show 1
     If Not handlers.Accepted Then GoTo Cleanup
 

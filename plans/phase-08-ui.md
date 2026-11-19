@@ -38,8 +38,9 @@ Private Function ShowConflictReview(ByRef conflicts As Variant, ByRef choices As
 Private Function AddValueBox(ByRef form As Object, ByVal name As String, ByVal labelText As String, ByVal left As Double, ByVal top As Double) As Object
 Private Function AddButton(ByRef form As Object, ByVal name As String, ByVal caption As String, ByVal left As Double, ByVal top As Double, ByVal width As Double) As Object
 Private Function AddLabel(ByRef form As Object, ByVal name As String, ByVal left As Double, ByVal top As Double, ByVal width As Double, ByVal height As Double, ByVal caption As String) As Object
-Public Sub CTargetSelectorEvents.Bind(ByVal formObject As Object, ByVal listBox As Object, ByVal acceptButton As Object, ByVal cancelButton As Object)
+Public Sub CTargetSelectorEvents.Bind(ByVal formObject As Object, ByVal listBox As Object, ByVal acceptButton As Object, ByVal cancelButton As Object, ByVal emptySelectionMessage As String)
 Public Property Get CTargetSelectorEvents.Accepted() As Boolean
+Public Property Get CTargetSelectorEvents.SelectedIndex() As Long
 Private Sub CTargetSelectorEvents.mAcceptButton_Click()
 Private Sub CTargetSelectorEvents.mCancelButton_Click()
 Public Sub CConflictReviewEvents.Bind(ByVal formObject As Object, ByRef conflicts As Variant, ByVal locationLabel As Object, ByVal countLabel As Object, ByVal baseValue As Object, ByVal localValue As Object, ByVal remoteValue As Object, ByVal previousButton As Object, ByVal nextButton As Object, ByVal localButton As Object, ByVal remoteButton As Object, ByVal finishButton As Object, ByVal cancelButton As Object)
@@ -87,4 +88,4 @@ Private Function CConflictReviewEvents.ReadConflictBounds(ByRef conflicts As Var
 - **Office Forms 运行时和 Ribbon 操作尚未完整验收。** 正式包的 Ribbon 标签已在本机 Office 2019 中确认可加载，且 Content Type 必须为 `application/xml`；按钮点击、Forms 窗体以及目标环境策略仍需 Phase 9 实测。
 - 冲突值按字符串原样显示，换行仅标准化显示；空值以“（空白）”标记。当前合同只允许字符串与 Empty，因此不提供日期、错误值或其他类型的编辑/裁决路径。
 - 锁冲突时提示导致失败的 sheet/AMG 列；按已确认策略整组取消，不提供跳过占用列继续。
-- 当前无配置维护窗体；本次扩展暂按用户手工维护本机 `config.ini`，快速上手文档必须包含文件格式和示例。是否增加设置界面仍待确认；若决定增加，须另行修改本计划的三个按钮范围约束和 UI 测试范围。
+- 配置维护固定为用户手工编辑本机 `%LOCALAPPDATA%\MDDTLock\config.ini`，内容仅接受 UNC 路径；README 和配置缺失提示说明创建目录、创建/编辑文件、按 `WorkbookPath=` 增删条目以及版本 2 示例。不增加配置管理窗体。
