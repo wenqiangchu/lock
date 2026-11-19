@@ -100,8 +100,8 @@ Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookR
             normalizedPath = Trim$(path)
             If Not IsLocalAppDataPath(normalizedPath) Then GoTo InvalidPath
         Case WorkbookSharedRemote
-            If Not ValidateUncPath(path, normalizedPath, errorInfo) Then Exit Function
-            If Not InspectUncPath(normalizedPath, pathStatus, systemError, pathError) Then
+            If Not ValidateWorkbookPath(path, normalizedPath, errorInfo) Then Exit Function
+            If Not InspectWorkbookPath(normalizedPath, pathStatus, systemError, pathError) Then
                 errorInfo = pathError
                 Exit Function
             End If
@@ -149,7 +149,7 @@ Public Function OpenWorkbookHandle(ByVal path As String, ByVal role As WorkbookR
     Exit Function
 
 InvalidPath:
-    errorInfo = MakeAppError(ERR_EXCEL_INVALID_INPUT, "MdlExcel.OpenWorkbookHandle", "A local path below LOCALAPPDATA or a configured UNC shared path is required.", path)
+    errorInfo = MakeAppError(ERR_EXCEL_INVALID_INPUT, "MdlExcel.OpenWorkbookHandle", "A local copy below LOCALAPPDATA or a fully qualified workbook path is required.", path)
     Exit Function
 
 Failed:

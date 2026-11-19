@@ -3,13 +3,13 @@ Option Explicit
 
 Public Sub RunMdlInfraTests()
     On Error GoTo Failed
-    TestUncValidation
+    TestWorkbookPathValidation
     TestPathErrorClassification
     TestCellValueComparison
     TestFormattingSnapshotProtocol
     TestConfigRoundTrip
     TestLegacyConfigRead
-    TestConfigRejectsMappedAndDuplicatePaths
+    TestConfigRejectsDuplicatePaths
     TestMissingConfigReportsPath
     TestLocalPathGuard
     TestGuidGeneration
@@ -65,16 +65,20 @@ Private Sub TestFormattingSnapshotProtocol()
     AssertEqual fieldValue, "a:b", "Field decoding should preserve embedded delimiters."
 End Sub
 
-Private Sub TestUncValidation()
+Private Sub TestWorkbookPathValidation()
     Dim normalized As String
     Dim errorInfo As AppErrorInfo
 
-    AssertTrue ValidateUncPath("\\server\share\folder\book.xlsx", normalized, errorInfo), "UNC path should validate."
+    AssertTrue ValidateWorkbookPath("\\server\share\folder\book.xlsx", normalized, errorInfo), "UNC path should validate."
     AssertEqual normalized, "\\server\share\folder\book.xlsx", "UNC path should be normalized."
-    AssertTrue ValidateUncPath("//server/share/book.xlsx", normalized, errorInfo), "Forward slashes should normalize to UNC separators."
+    AssertTrue ValidateWorkbookPath("//server/share/book.xlsx", normalized, errorInfo), "Forward slashes should normalize to UNC separators."
     AssertEqual normalized, "\\server\share\book.xlsx", "Forward slash path normalization is incorrect."
-    AssertFalse ValidateUncPath("X:\folder\book.xlsx", normalized, errorInfo), "Mapped drives must not be accepted as config paths."
-    AssertFalse ValidateUncPath("\server", normalized, errorInfo), "A server without a share must be rejected."
+    AssertTrue ValidateWorkbookPath("X:\folder\book.xlsx", normalized, errorInfo), "An absolute mapped-drive path should validate without checking its target."
+    AssertEqual normalized, "X:\folder\book.xlsx", "Mapped-drive path normalization is incorrect."
+    AssertTrue ValidateWorkbookPath("C:\test\MDDT.xlsx", normalized, errorInfo), "An absolute local path should validate for controlled tests."
+    AssertFalse ValidateWorkbookPath("X:folder\book.xlsx", normalized, errorInfo), "A drive-relative path must be rejected."
+    AssertFalse ValidateWorkbookPath("\server", normalized, errorInfo), "A rooted path without a drive or share must be rejected."
+    AssertFalse ValidateWorkbookPath("\\server", normalized, errorInfo), "A server without a share must be rejected."
 End Sub
 
 Private Sub TestPathErrorClassification()
@@ -114,15 +118,16 @@ Private Sub TestConfigRoundTrip()
 
     folder = GetLocalAppDataFolder() & "\tests\infra-" & Format$(Now, "yyyymmddhhnnss")
     configPath = folder & "\config.ini"
-    sourceConfig.WorkbookPaths = Array("\\server\share\study.xlsx", "\\server\share\team-b\study.xlsx")
+    sourceConfig.WorkbookPaths = Array("\\server\share\study.xlsx", "X:\team-b\study.xlsx", "C:\test\MDDT.xlsx")
     sourceConfig.Version = 2
 
     On Error GoTo Failed
     AssertTrue WriteConfig(configPath, sourceConfig, errorInfo), "Config should write below LOCALAPPDATA."
     AssertTrue ReadConfig(configPath, loadedConfig, errorInfo), "Config should read after writing."
-    AssertEqual CStr(UBound(loadedConfig.WorkbookPaths) - LBound(loadedConfig.WorkbookPaths) + 1), "2", "Both configured workbook paths should round-trip."
+    AssertEqual CStr(UBound(loadedConfig.WorkbookPaths) - LBound(loadedConfig.WorkbookPaths) + 1), "3", "UNC, drive-letter, and local test paths should round-trip."
     AssertEqual CStr(loadedConfig.WorkbookPaths(1)), "\\server\share\study.xlsx", "The first config path did not round-trip."
-    AssertEqual CStr(loadedConfig.WorkbookPaths(2)), "\\server\share\team-b\study.xlsx", "The second config path did not round-trip."
+    AssertEqual CStr(loadedConfig.WorkbookPaths(2)), "X:\team-b\study.xlsx", "The mapped-drive config path did not round-trip."
+    AssertEqual CStr(loadedConfig.WorkbookPaths(3)), "C:\test\MDDT.xlsx", "The local test path did not round-trip."
     AssertEqual CStr(loadedConfig.Version), "2", "The config writer should emit version 2."
 
     GoTo Cleanup
@@ -169,7 +174,7 @@ Cleanup:
     If failureNumber <> 0 Then Err.Raise failureNumber, "TestMdlInfra.TestLegacyConfigRead", failureDescription
 End Sub
 
-Private Sub TestConfigRejectsMappedAndDuplicatePaths()
+Private Sub TestConfigRejectsDuplicatePaths()
     Dim folder As String
     Dim configPath As String
     Dim fileNumber As Integer
@@ -182,11 +187,8 @@ Private Sub TestConfigRejectsMappedAndDuplicatePaths()
     folder = GetLocalAppDataFolder() & "\tests\infra-invalid"
     configPath = folder & "\config.ini"
     On Error GoTo Failed
-    config.WorkbookPaths = Array("X:\folder\book.xlsx")
-    AssertFalse WriteConfig(configPath, config, errorInfo), "Mapped drive paths must not be written to config."
-
-    config.WorkbookPaths = Array("\\server\share\book.xlsx", "\\SERVER\SHARE\book.xlsx")
-    AssertFalse WriteConfig(configPath, config, errorInfo), "Duplicate UNC paths must be rejected case-insensitively."
+    config.WorkbookPaths = Array("X:\folder\book.xlsx", "x:\FOLDER\BOOK.xlsx")
+    AssertFalse WriteConfig(configPath, config, errorInfo), "Duplicate absolute paths must be rejected case-insensitively."
 
     AssertTrue EnsureLocalAppDirectory(folder, errorInfo), "The invalid config test folder should be created locally."
     fileNumber = FreeFile
@@ -206,7 +208,7 @@ Cleanup:
     If fileNumber > 0 Then Close #fileNumber
     On Error GoTo 0
     CleanupConfigTestFile folder, configPath
-    If failureNumber <> 0 Then Err.Raise failureNumber, "TestMdlInfra.TestConfigRejectsMappedAndDuplicatePaths", failureDescription
+    If failureNumber <> 0 Then Err.Raise failureNumber, "TestMdlInfra.TestConfigRejectsDuplicatePaths", failureDescription
 End Sub
 
 Private Sub TestMissingConfigReportsPath()

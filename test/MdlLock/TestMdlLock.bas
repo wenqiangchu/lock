@@ -6,6 +6,8 @@ Private Const TEST_FILE_PATH As String = "\\test-server\share\book.xlsx"
 Public Sub RunMdlLockTests()
     RunTestCase "ContentionAndRelease"
     RunTestCase "DifferentColumnsAndBatchRollback"
+    RunTestCase "ReadableLockLayoutAndPathAliases"
+    RunTestCase "WorkbookRootsAreIndependent"
     RunTestCase "RenewAndOwnershipMismatch"
     RunTestCase "ExpiredAndDamagedLocks"
     RunTestCase "InspectStatus"
@@ -52,6 +54,8 @@ Private Sub RunTestCase(ByVal caseName As String)
     Select Case caseName
         Case "ContentionAndRelease": TestContentionAndRelease
         Case "DifferentColumnsAndBatchRollback": TestDifferentColumnsAndBatchRollback
+        Case "ReadableLockLayoutAndPathAliases": TestReadableLockLayoutAndPathAliases
+        Case "WorkbookRootsAreIndependent": TestWorkbookRootsAreIndependent
         Case "RenewAndOwnershipMismatch": TestRenewAndOwnershipMismatch
         Case "ExpiredAndDamagedLocks": TestExpiredAndDamagedLocks
         Case "InspectStatus": TestInspectStatus
@@ -63,6 +67,80 @@ Private Sub RunTestCase(ByVal caseName As String)
 
 Failed:
     TestSupport.RecordTestFailure "TestMdlLock." & caseName & ": " & Err.Description & " (" & CStr(Err.Number) & ")"
+End Sub
+
+Private Sub TestWorkbookRootsAreIndependent()
+    Dim firstRoot As String
+    Dim secondRoot As String
+    Dim firstOwner As CLockCoordinator
+    Dim secondOwner As CLockCoordinator
+    Dim targets As Variant
+    Dim firstLeases As Variant
+    Dim secondLeases As Variant
+    Dim failures As Variant
+    Dim errorInfo As AppErrorInfo
+
+    On Error GoTo Cleanup
+    firstRoot = NewTestRoot()
+    secondRoot = NewTestRoot()
+    Set firstOwner = NewTestCoordinator(firstRoot)
+    Set secondOwner = NewTestCoordinator(secondRoot)
+    targets = OneTarget("AMG_A")
+
+    AssertTrue firstOwner.AcquireLocks(targets, "first-root", firstLeases, errorInfo), "The first workbook root should acquire the target. " & errorInfo.Message
+    AssertTrue secondOwner.AcquireLocks(targets, "second-root", secondLeases, errorInfo), "The same file identity in a different parent directory should use an independent lock root. " & errorInfo.Message
+    AssertFalse StrComp(CStr(firstLeases(1, 1)), CStr(secondLeases(1, 1)), vbTextCompare) = 0, "Different parent directories must not share a lock path."
+    AssertTrue firstOwner.ReleaseLocks(firstLeases, failures), "The first root lock should release."
+    AssertTrue secondOwner.ReleaseLocks(secondLeases, failures), "The second root lock should release."
+    GoTo Cleanup
+
+Cleanup:
+    RemoveTestRoot firstRoot
+    RemoveTestRoot secondRoot
+    If Err.Number <> 0 Then TestSupport.RecordTestFailure "TestMdlLock.WorkbookRootsAreIndependent: " & Err.Description & " (" & CStr(Err.Number) & ")"
+End Sub
+
+Private Sub TestReadableLockLayoutAndPathAliases()
+    Dim root As String
+    Dim owner As CLockCoordinator
+    Dim contender As CLockCoordinator
+    Dim uncTarget As Variant
+    Dim mappedTarget As Variant
+    Dim columnTargets As Variant
+    Dim leases As Variant
+    Dim contenderLeases As Variant
+    Dim columnLeases As Variant
+    Dim failures As Variant
+    Dim errorInfo As AppErrorInfo
+    Dim firstPath As String
+    Dim secondPath As String
+
+    On Error GoTo Cleanup
+    root = NewTestRoot()
+    Set owner = NewTestCoordinator(root)
+    Set contender = NewTestCoordinator(root)
+    uncTarget = OneTargetForPath(TEST_FILE_PATH, "Sheet~One", "AMG-A")
+    mappedTarget = OneTargetForPath("X:\mapped\book.xlsx", "SHEET~ONE", "amg-a")
+
+    AssertTrue owner.AcquireLocks(uncTarget, "unc-owner", leases, errorInfo), "The UNC-spelled target should acquire its lock. " & errorInfo.Message
+    firstPath = CStr(leases(1, 1))
+    AssertTrue InStr(1, firstPath, "\history\mddtlock\BOOK.XLSX\S-SHEET~007EONE__C-AMG-A_LOCK", vbTextCompare) > 0, "The lock path should identify its workbook, sheet, and escaped AMG target."
+    AssertFalse contender.AcquireLocks(mappedTarget, "mapped-user", contenderLeases, errorInfo), "A drive-letter alias to the same workbook identity should encounter the existing lock."
+    AssertTrue owner.ReleaseLocks(leases, failures), "The original alias should release the shared lock."
+
+    columnTargets = TwoTargets("AMG_A", "AMG_B")
+    AssertTrue owner.AcquireLocks(columnTargets, "two-columns", columnLeases, errorInfo), "Different columns should acquire independent lock directories. " & errorInfo.Message
+    firstPath = CStr(columnLeases(1, 1))
+    secondPath = CStr(columnLeases(2, 1))
+    AssertFalse StrComp(firstPath, secondPath, vbTextCompare) = 0, "Different AMG columns must use different lock directories."
+    AssertTrue InStr(1, firstPath, "__C-AMG_A_LOCK", vbTextCompare) > 0, "The first column name should be visible in its lock directory."
+    AssertTrue InStr(1, secondPath, "__C-AMG_B_LOCK", vbTextCompare) > 0, "The second column name should be visible in its lock directory."
+    AssertTrue owner.ReleaseLocks(columnLeases, failures), "Both column locks should release independently."
+    GoTo Cleanup
+
+Cleanup:
+    RemoveTestRoot root
+    If Err.Number <> 0 Then TestSupport.RecordTestFailure "TestMdlLock.ReadableLockLayoutAndPathAliases: " & Err.Description & " (" & CStr(Err.Number) & ")"
 End Sub
 
 Private Sub TestInspectStatus()
@@ -365,6 +443,9 @@ Private Sub TestRejectInvalidTargets()
     AssertTrue IsEmpty(leases), "Invalid targets must not return leases."
     targets = OneTarget("AMG_A")
     AssertFalse owner.AcquireLocks(targets, "../unsafe", leases, errorInfo), "Unsafe session IDs must be rejected."
+    targets = OneTarget("AMG" & String$(200, "A"))
+    AssertFalse owner.AcquireLocks(targets, "long-path", leases, errorInfo), "Lock paths beyond the supported Windows path length must fail closed."
+    AssertTrue IsEmpty(leases), "An unsupported long lock path must not return a lease."
     GoTo Cleanup
 
 Cleanup:
@@ -393,11 +474,15 @@ Private Sub RemoveTestRoot(ByVal root As String)
 End Sub
 
 Private Function OneTarget(ByVal amgHeader As String) As Variant
+    OneTarget = OneTargetForPath(TEST_FILE_PATH, "Sheet1", amgHeader)
+End Function
+
+Private Function OneTargetForPath(ByVal filePath As String, ByVal sheetName As String, ByVal amgHeader As String) As Variant
     Dim targets(1 To 1, 1 To 3) As Variant
-    targets(1, 1) = TEST_FILE_PATH
-    targets(1, 2) = "Sheet1"
+    targets(1, 1) = filePath
+    targets(1, 2) = sheetName
     targets(1, 3) = amgHeader
-    OneTarget = targets
+    OneTargetForPath = targets
 End Function
 
 Private Function TwoTargets(ByVal firstHeader As String, ByVal secondHeader As String) As Variant

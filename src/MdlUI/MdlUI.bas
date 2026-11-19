@@ -98,7 +98,7 @@ Private Function ShowWorkbookSelector(ByRef paths As Variant, ByRef selectedPath
     End With
     Set heading = form.Controls.Add("Forms.Label.1", "lblWorkbookHeading", True)
     With heading
-        .Caption = "Select one configured shared workbook (UNC path)."
+        .Caption = "Select one configured workbook (UNC or drive path)."
         .Left = 12
         .Top = 10
         .Width = 640

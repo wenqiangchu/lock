@@ -41,7 +41,7 @@ Public Const ERR_INVALID_INPUT As Long = 1001
 Public Const ERR_CONFIG_MISSING As Long = 1002
 Public Const ERR_CONFIG_INVALID As Long = 1003
 Public Const ERR_IO As Long = 1004
-Public Const ERR_UNC_REQUIRED As Long = 1005
+Public Const ERR_PATH_INVALID As Long = 1005
 Public Const ERR_NOT_FOUND As Long = 1007
 
 Public Const FONT_FORMAT_PROPERTY_COUNT As Long = 14
@@ -109,45 +109,46 @@ Public Function GetDefaultConfigPath() As String
     If Len(appFolder) > 0 Then GetDefaultConfigPath = JoinPath(appFolder, CONFIG_FILE_NAME)
 End Function
 
-Public Function ValidateUncPath(ByVal path As String, ByRef normalizedPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ValidateWorkbookPath(ByVal path As String, ByRef normalizedPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim value As String
     Dim serverAndShare As String
     Dim slashAt As Long
+    Dim driveCode As Long
 
     normalizedPath = vbNullString
     value = Replace$(Trim$(path), "/", "\")
-    If Len(value) < 5 Or Left$(value, 2) <> "\\" Then
-        errorInfo = MakeAppError(ERR_UNC_REQUIRED, "MdlInfra.ValidateUncPath", "A UNC path is required.", path)
-        Exit Function
-    End If
     If Left$(value, 4) = "\\?\" Or Left$(value, 4) = "\\.\" Then
-        errorInfo = MakeAppError(ERR_UNC_REQUIRED, "MdlInfra.ValidateUncPath", "Device paths are not accepted as configuration paths.", path)
-        Exit Function
+        GoTo InvalidPath
     End If
 
-    serverAndShare = Mid$(value, 3)
-    slashAt = InStr(1, serverAndShare, "\", vbBinaryCompare)
-    If slashAt < 2 Or slashAt = Len(serverAndShare) Then
-        errorInfo = MakeAppError(ERR_UNC_REQUIRED, "MdlInfra.ValidateUncPath", "The UNC path must include a server and share name.", path)
-        Exit Function
-    End If
-    If InStr(slashAt + 1, serverAndShare, "\", vbBinaryCompare) = slashAt + 1 Then
-        errorInfo = MakeAppError(ERR_UNC_REQUIRED, "MdlInfra.ValidateUncPath", "The UNC share name cannot be empty.", path)
-        Exit Function
+    If Left$(value, 2) = "\\" Then
+        If Len(value) < 5 Then GoTo InvalidPath
+        serverAndShare = Mid$(value, 3)
+        slashAt = InStr(1, serverAndShare, "\", vbBinaryCompare)
+        If slashAt < 2 Or slashAt = Len(serverAndShare) Then GoTo InvalidPath
+        If InStr(slashAt + 1, serverAndShare, "\", vbBinaryCompare) = slashAt + 1 Then GoTo InvalidPath
+    Else
+        If Len(value) < 4 Or Mid$(value, 2, 2) <> ":\" Then GoTo InvalidPath
+        driveCode = AscW(UCase$(Left$(value, 1)))
+        If driveCode < 65 Or driveCode > 90 Then GoTo InvalidPath
     End If
 
     normalizedPath = value
-    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.ValidateUncPath", "")
-    ValidateUncPath = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.ValidateWorkbookPath", "")
+    ValidateWorkbookPath = True
+    Exit Function
+
+InvalidPath:
+    errorInfo = MakeAppError(ERR_PATH_INVALID, "MdlInfra.ValidateWorkbookPath", "Use a UNC path or a fully qualified drive-letter path.", path)
 End Function
 
-Public Function InspectUncPath(ByVal path As String, ByRef status As SharedPathStatus, ByRef systemError As Long, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function InspectWorkbookPath(ByVal path As String, ByRef status As SharedPathStatus, ByRef systemError As Long, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim normalized As String
     Dim attributes As Long
 
     status = SharedPathUnknown
     systemError = 0
-    If Not ValidateUncPath(path, normalized, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(path, normalized, errorInfo) Then Exit Function
 
     attributes = GetFileAttributesW(StrPtr(normalized))
     If attributes <> INVALID_FILE_ATTRIBUTES Then
@@ -156,15 +157,15 @@ Public Function InspectUncPath(ByVal path As String, ByRef status As SharedPathS
         Else
             status = SharedPathAvailable
         End If
-        InspectUncPath = True
-        errorInfo = MakeAppError(ERR_NONE, "MdlInfra.InspectUncPath", "")
+        InspectWorkbookPath = True
+        errorInfo = MakeAppError(ERR_NONE, "MdlInfra.InspectWorkbookPath", "")
         Exit Function
     End If
 
     systemError = GetLastError()
     status = ClassifySharedPathError(systemError)
-    InspectUncPath = True
-    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.InspectUncPath", "", CStr(systemError))
+    InspectWorkbookPath = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.InspectWorkbookPath", "", CStr(systemError))
 End Function
 
 Public Function ClassifySharedPathError(ByVal systemError As Long) As SharedPathStatus
@@ -204,7 +205,7 @@ Public Function ReadConfig(ByVal configPath As String, ByRef config As AppConfig
         Exit Function
     End If
     If Len(Dir$(configPath, vbNormal Or vbHidden Or vbSystem)) = 0 Then
-        errorInfo = MakeAppError(ERR_CONFIG_MISSING, "MdlInfra.ReadConfig", "Configuration file is missing. Create config.ini with Version=2 and one or more UNC WorkbookPath= entries.", configPath)
+        errorInfo = MakeAppError(ERR_CONFIG_MISSING, "MdlInfra.ReadConfig", "Configuration file is missing. Create config.ini with Version=2 and one or more workbook path entries.", configPath)
         Exit Function
     End If
 
@@ -283,7 +284,7 @@ NextLine:
 
 InvalidConfig:
     config.WorkbookPaths = Empty
-    errorInfo = MakeAppError(ERR_CONFIG_INVALID, "MdlInfra.ReadConfig", "Configuration is invalid. Use Version=2 with unique UNC WorkbookPath= entries.", configPath)
+    errorInfo = MakeAppError(ERR_CONFIG_INVALID, "MdlInfra.ReadConfig", "Configuration is invalid. Use Version=2 with unique absolute WorkbookPath= entries.", configPath)
     Exit Function
 
 Failed:
@@ -347,7 +348,7 @@ Private Function NormalizeConfigPaths(ByRef sourcePaths As Variant, ByRef normal
 
     For index = lowerBound To upperBound
         If VarType(sourcePaths(index)) <> vbString Then GoTo InvalidConfigPaths
-        If Not ValidateUncPath(CStr(sourcePaths(index)), normalized, errorInfo) Then GoTo InvalidConfigPaths
+        If Not ValidateWorkbookPath(CStr(sourcePaths(index)), normalized, errorInfo) Then GoTo InvalidConfigPaths
         For priorIndex = 1 To index - lowerBound
             If StrComp(CStr(result(priorIndex)), normalized, vbTextCompare) = 0 Then GoTo InvalidConfigPaths
         Next priorIndex
@@ -361,28 +362,28 @@ Private Function NormalizeConfigPaths(ByRef sourcePaths As Variant, ByRef normal
 
 InvalidConfigPaths:
     normalizedPaths = Empty
-    errorInfo = MakeAppError(ERR_CONFIG_INVALID, "MdlInfra.NormalizeConfigPaths", "Workbook paths must be unique UNC file paths.")
+    errorInfo = MakeAppError(ERR_CONFIG_INVALID, "MdlInfra.NormalizeConfigPaths", "Workbook paths must be unique absolute paths.")
 End Function
 
-Public Function ProbeUncLatency(ByVal path As String, ByRef elapsedMs As Double, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ProbeWorkbookPathLatency(ByVal path As String, ByRef elapsedMs As Double, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim normalized As String
     Dim startedAt As Double
     Dim attributes As Long
 
     On Error GoTo Failed
-    If Not ValidateUncPath(path, normalized, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(path, normalized, errorInfo) Then Exit Function
     startedAt = Timer
     attributes = GetAttr(normalized)
     elapsedMs = Timer - startedAt
     If elapsedMs < 0 Then elapsedMs = elapsedMs + 86400#
     elapsedMs = elapsedMs * 1000#
-    ProbeUncLatency = True
-    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.ProbeUncLatency", "")
+    ProbeWorkbookPathLatency = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlInfra.ProbeWorkbookPathLatency", "")
     Exit Function
 
 Failed:
     elapsedMs = 0
-    errorInfo = MakeAppError(ERR_IO, "MdlInfra.ProbeUncLatency", "The existing UNC target could not be read.", CStr(Err.Number) & ": " & Err.Description)
+    errorInfo = MakeAppError(ERR_IO, "MdlInfra.ProbeWorkbookPathLatency", "The workbook path could not be read.", CStr(Err.Number) & ": " & Err.Description)
 End Function
 
 Public Function CompareCellValues(ByVal leftValue As Variant, ByVal rightValue As Variant, ByRef equal As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean

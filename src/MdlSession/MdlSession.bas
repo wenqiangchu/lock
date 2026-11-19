@@ -86,7 +86,7 @@ Public Function BeginCheckout(ByVal workbookPath As String, ByRef targets As Var
     mSessionId = NewGuidString()
     If Len(mSessionId) = 0 Then GoTo Failed
     If Not ReadConfig(GetDefaultConfigPath(), config, errorInfo) Then GoTo Failed
-    If Not ValidateUncPath(workbookPath, normalizedFile, errorInfo) Then GoTo Failed
+    If Not ValidateWorkbookPath(workbookPath, normalizedFile, errorInfo) Then GoTo Failed
     If Not IsConfiguredWorkbookPath(config.WorkbookPaths, normalizedFile) Then
         errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.BeginCheckout", "The selected workbook is no longer in the configuration list. Reload the list and select a configured workbook.", normalizedFile)
         GoTo Failed
@@ -110,7 +110,7 @@ Public Function BeginCheckout(ByVal workbookPath As String, ByRef targets As Var
 
     If Not AcquireLocks(mTargets, mSessionId, mLeases, errorInfo) Then GoTo Failed
     If Not CreateLocalWorkspace(mSessionId, mWorkspacePath, errorInfo) Then GoTo Rollback
-    If Not CopySharedFileToWorkspace(mMainFilePath, mWorkspacePath, mLocalFilePath, errorInfo) Then GoTo Rollback
+    If Not CopyWorkbookToWorkspace(mMainFilePath, mWorkspacePath, mLocalFilePath, errorInfo) Then GoTo Rollback
     If Not OpenWorkbookHandle(mLocalFilePath, WorkbookLocalCopy, mLocalHandle, errorInfo) Then GoTo Rollback
 
     ReDim mBaseSnapshots(1 To mGroupCount)
@@ -159,7 +159,7 @@ Public Function GetAvailableTargets(ByVal workbookPath As String, ByRef targets 
 
     targets = Empty
     If Not ReadConfig(GetDefaultConfigPath(), config, errorInfo) Then Exit Function
-    If Not ValidateUncPath(workbookPath, normalizedFile, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(workbookPath, normalizedFile, errorInfo) Then Exit Function
     If Not IsConfiguredWorkbookPath(config.WorkbookPaths, normalizedFile) Then
         errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.GetAvailableTargets", "The selected workbook is not in the configuration list.", normalizedFile)
         Exit Function
@@ -676,7 +676,7 @@ Private Function NormalizeTargets(ByRef targets As Variant, ByVal expectedFile A
     For rowIndex = rowLow To rowHigh
         outputIndex = outputIndex + 1
         If VarType(targets(rowIndex, columnLow)) <> vbString Or VarType(targets(rowIndex, columnLow + 1)) <> vbString Or VarType(targets(rowIndex, columnLow + 2)) <> vbString Then GoTo InvalidTargets
-        If Not ValidateUncPath(CStr(targets(rowIndex, columnLow)), normalizedFile, errorInfo) Then Exit Function
+        If Not ValidateWorkbookPath(CStr(targets(rowIndex, columnLow)), normalizedFile, errorInfo) Then Exit Function
         If StrComp(normalizedFile, expectedFile, vbTextCompare) <> 0 Then GoTo InvalidTargets
         filePath = normalizedFile
         result(outputIndex, 1) = filePath
@@ -691,7 +691,7 @@ Private Function NormalizeTargets(ByRef targets As Variant, ByVal expectedFile A
 
 InvalidTargets:
     normalizedTargets = Empty
-    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.NormalizeTargets", "Targets must contain the configured UNC file, a sheet name, and an AMG header.")
+    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.NormalizeTargets", "Targets must contain the configured workbook path, a sheet name, and an AMG header.")
 End Function
 
 Private Function BuildTargetGroups(ByRef targets As Variant, ByRef sheetNames As Variant, ByRef groupTargets As Variant, ByRef groupCount As Long, ByRef errorInfo As AppErrorInfo) As Boolean

@@ -10,7 +10,8 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Const OWNER_FILE_NAME As String = "owner.txt"
-Private Const LOCK_ROOT_NAME As String = ".mddt-locks"
+Private Const LOCK_PARENT_NAME As String = "history"
+Private Const LOCK_ROOT_NAME As String = "mddtlock"
 Private Const OWNER_VERSION As String = "1"
 Private Const DEFAULT_COLUMN_TTL_SECONDS As Long = 300
 Private Const DEFAULT_GATE_TTL_SECONDS As Long = 600
@@ -120,7 +121,7 @@ Friend Function AcquireLocks(ByRef targets As Variant, ByVal sessionId As String
     Exit Function
 
 InvalidInput:
-    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.AcquireLocks", "Targets must be unique UNC file, sheet, and AMG header rows.")
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.AcquireLocks", "Targets must be unique absolute workbook path, sheet, and AMG header rows.")
     Exit Function
 
 Rollback:
@@ -225,7 +226,7 @@ Friend Function InspectTargetLock(ByRef targetFields As Variant, ByRef status As
 
 InvalidInput:
     status = LockUnknown
-    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.InspectTargetLock", "A target must contain a UNC file path, sheet, and AMG header.")
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.InspectTargetLock", "A target must contain an absolute workbook path, sheet, and AMG header.")
 End Function
 
 Friend Function ReleaseLocks(ByRef leases As Variant, ByRef failures As Variant) As Boolean
@@ -278,7 +279,7 @@ Friend Function TryReclaimExpiredLock(ByRef targetFields As Variant, ByRef recla
     Exit Function
 
 InvalidInput:
-    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.TryReclaimExpiredLock", "A target must contain a UNC file path, sheet, and AMG header.")
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.TryReclaimExpiredLock", "A target must contain an absolute workbook path, sheet, and AMG header.")
 End Function
 
 Friend Function AcquireCommitGate(ByVal fileKey As String, ByVal sessionId As String, ByRef gateFields As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
@@ -290,9 +291,10 @@ Friend Function AcquireCommitGate(ByVal fileKey As String, ByVal sessionId As St
 
     gateFields = Empty
     If Not IsSafeIdentifier(sessionId) Then GoTo InvalidInput
-    If Not ValidateUncPath(fileKey, normalizedFile, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(fileKey, normalizedFile, errorInfo) Then Exit Function
     targetKey = BuildFileTargetKey(normalizedFile, "COMMIT")
-    If Not BuildLockPath(normalizedFile, targetKey, lockPath, errorInfo) Then Exit Function
+    If Len(targetKey) = 0 Then GoTo InvalidInput
+    If Not BuildLockPath(normalizedFile, "COMMIT", "GATE", lockPath, errorInfo) Then Exit Function
     If Not TryAcquireLockDirectory(lockPath, targetKey, sessionId, mGateTtlSeconds, token, errorInfo) Then Exit Function
     result(1) = lockPath
     result(2) = targetKey
@@ -304,7 +306,7 @@ Friend Function AcquireCommitGate(ByVal fileKey As String, ByVal sessionId As St
     Exit Function
 
 InvalidInput:
-    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.AcquireCommitGate", "A UNC file key and safe session ID are required.")
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.AcquireCommitGate", "An absolute workbook path and safe session ID are required.")
 End Function
 
 Friend Function ValidateCommitGate(ByRef gateFields As Variant, ByRef valid As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
@@ -336,15 +338,17 @@ Private Function BuildTargetKey(ByVal fileKey As String, ByVal sheetName As Stri
     Dim normalizedFile As String
     Dim normalizedSheet As String
     Dim normalizedAmg As String
+    Dim fileName As String
 
     targetKey = vbNullString
     lockPath = vbNullString
-    If Not ValidateUncPath(fileKey, normalizedFile, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(fileKey, normalizedFile, errorInfo) Then Exit Function
+    If Not TryGetFileName(normalizedFile, fileName) Then GoTo InvalidInput
     normalizedSheet = UCase$(Trim$(sheetName))
     normalizedAmg = UCase$(Trim$(amgHeader))
     If Len(normalizedSheet) = 0 Or Len(normalizedAmg) < 3 Or Left$(normalizedAmg, 3) <> "AMG" Then GoTo InvalidInput
-    targetKey = BuildFileTargetKey(normalizedFile, normalizedSheet) & EncodePart(normalizedAmg)
-    If Not BuildLockPath(normalizedFile, targetKey, lockPath, errorInfo) Then Exit Function
+    targetKey = EncodePart(UCase$(fileName)) & EncodePart(normalizedSheet) & EncodePart(normalizedAmg)
+    If Not BuildLockPath(normalizedFile, normalizedSheet, normalizedAmg, lockPath, errorInfo) Then Exit Function
     BuildTargetKey = True
     Exit Function
 
@@ -353,7 +357,10 @@ InvalidInput:
 End Function
 
 Private Function BuildFileTargetKey(ByVal fileKey As String, ByVal role As String) As String
-    BuildFileTargetKey = EncodePart(UCase$(Replace$(fileKey, "/", "\"))) & EncodePart(UCase$(role))
+    Dim fileName As String
+
+    If Not TryGetFileName(fileKey, fileName) Then Exit Function
+    BuildFileTargetKey = EncodePart(UCase$(fileName)) & EncodePart(UCase$(role))
 End Function
 
 Private Function EncodePart(ByVal value As String) As String
@@ -387,30 +394,41 @@ Private Function DecodeUtf16(ByVal value As String) As String
     DecodeUtf16 = decoded
 End Function
 
-Private Function BuildLockPath(ByVal fileKey As String, ByVal targetKey As String, ByRef lockPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function BuildLockPath(ByVal fileKey As String, ByVal sheetName As String, ByVal columnName As String, ByRef lockPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim rootPath As String
+    Dim historyPath As String
     Dim fileRoot As String
-    Dim separatorAt As Long
+    Dim parent As String
+    Dim fileName As String
     Dim created As Boolean
 
+    lockPath = vbNullString
+    If Not TryGetFileName(fileKey, fileName) Then GoTo InvalidInput
     If Len(mTestRoot) > 0 Then
-        rootPath = mTestRoot
-        If Not EnsureLocalAppDirectory(rootPath, errorInfo) Then Exit Function
+        parent = mTestRoot
+        If Not EnsureLocalAppDirectory(parent, errorInfo) Then Exit Function
     Else
-        separatorAt = InStrRev(fileKey, "\")
-        If separatorAt <= 2 Then GoTo InvalidInput
-        rootPath = Left$(fileKey, separatorAt - 1) & "\" & LOCK_ROOT_NAME
-        If Not StorageCreateDirectory(rootPath, created, errorInfo) Then Exit Function
+        parent = ParentPath(fileKey)
+        If Len(parent) = 0 Then GoTo InvalidInput
     End If
 
-    fileRoot = JoinPath(rootPath, HashKey(UCase$(fileKey)))
+    historyPath = JoinPath(parent, LOCK_PARENT_NAME)
+    If Not StorageCreateDirectory(historyPath, created, errorInfo) Then Exit Function
+    rootPath = JoinPath(historyPath, LOCK_ROOT_NAME)
+    If Not StorageCreateDirectory(rootPath, created, errorInfo) Then Exit Function
+    fileRoot = JoinPath(rootPath, EncodePathComponent(UCase$(fileName)))
     If Not StorageCreateDirectory(fileRoot, created, errorInfo) Then Exit Function
-    lockPath = JoinPath(fileRoot, HashKey(targetKey))
+    lockPath = JoinPath(fileRoot, "S-" & EncodePathComponent(UCase$(sheetName)) & "__C-" & EncodePathComponent(UCase$(columnName)) & "_LOCK")
+    If Len(lockPath) + Len("\" & OWNER_FILE_NAME) > 259 Then GoTo PathTooLong
     BuildLockPath = True
     Exit Function
 
 InvalidInput:
-    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.BuildLockPath", "The UNC file path must identify a file below a share root.", fileKey)
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.BuildLockPath", "The absolute workbook path must identify a file with a usable parent directory.", fileKey)
+    Exit Function
+
+PathTooLong:
+    errorInfo = MakeAppError(ERR_LOCK_INVALID, "MdlLock.BuildLockPath", "The readable lock path exceeds the supported Windows path length.", lockPath)
 End Function
 
 Private Function TryAcquireLockDirectory(ByVal lockPath As String, ByVal targetKey As String, ByVal sessionId As String, ByVal ttlSeconds As Long, ByRef fencingToken As String, ByRef errorInfo As AppErrorInfo) As Boolean
@@ -675,21 +693,27 @@ Private Function TryGetFileName(ByVal path As String, ByRef fileName As String) 
     TryGetFileName = (Len(fileName) > 0)
 End Function
 
-Private Function HashKey(ByVal value As String) As String
-    Dim hashValue As Double
-    Dim scaledValue As Double
+Private Function EncodePathComponent(ByVal value As String) As String
     Dim index As Long
     Dim code As Long
-    Const MODULUS As Double = 4294967291#
+    Dim character As String
+    Dim encoded As String
+    Dim normalized As String
 
-    hashValue = 2166136261#
-    For index = 1 To Len(value)
-        code = AscW(Mid$(value, index, 1))
-        If code < 0 Then code = code + 65536
-        scaledValue = hashValue * 251# + CDbl(code) + 1#
-        hashValue = scaledValue - Fix(scaledValue / MODULUS) * MODULUS
+    normalized = UCase$(value)
+    For index = 1 To Len(normalized)
+        character = Mid$(normalized, index, 1)
+        If (character >= "A" And character <= "Z") Or _
+           (character >= "0" And character <= "9") Or _
+           character = " " Or character = "-" Or character = "_" Or character = "." Then
+            encoded = encoded & character
+        Else
+            code = AscW(character)
+            If code < 0 Then code = code + 65536
+            encoded = encoded & "~" & Right$("0000" & Hex$(code), 4)
+        End If
     Next index
-    HashKey = Format$(hashValue, "0000000000")
+    EncodePathComponent = encoded
 End Function
 
 Private Function JoinPath(ByVal basePath As String, ByVal child As String) As String

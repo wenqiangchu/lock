@@ -1,15 +1,153 @@
 Attribute VB_Name = "TestMdlExcel"
 Option Explicit
 
+Private Const XL_OPEN_XML_WORKBOOK As Long = 51
+Private Const XL_WBAT_WORKSHEET As Long = -4167
+
 Public Sub RunMdlExcelTests()
     On Error GoTo Failed
     TestHeartbeatScheduling
     TestPhysicalSnapshotsAndDeclaredWrite
     TestOrphanAndInvalidEditableContent
+    TestRealWorkbookRoundTripAndFakeLock
     Exit Sub
 
 Failed:
     TestSupport.RecordTestFailure "TestMdlExcel: " & Err.Description & " (" & CStr(Err.Number) & ")"
+End Sub
+
+Private Sub TestRealWorkbookRoundTripAndFakeLock()
+    Dim root As String
+    Dim workbookPath As String
+    Dim lockPath As String
+    Dim errorInfo As AppErrorInfo
+    Dim cleanupError As AppErrorInfo
+    Dim failureNumber As Long
+    Dim failureDescription As String
+
+    On Error GoTo Failed
+    root = GetLocalAppDataFolder() & "\tests\excel-real-" & NewGuidString()
+    AssertTrue EnsureLocalAppDirectory(root, errorInfo), "The real workbook test root should be created below LOCALAPPDATA. " & errorInfo.Message
+    workbookPath = root & "\MDDTRealFixture.xlsx"
+    CreateRealTestWorkbook workbookPath
+    VerifyRealWorkbookRoundTrip workbookPath
+    VerifyRealWorkbookLockConflict workbookPath, lockPath
+    GoTo Cleanup
+
+Failed:
+    failureNumber = Err.Number
+    failureDescription = Err.Description
+Cleanup:
+    On Error Resume Next
+    If Len(lockPath) > 0 Then
+        If Not StorageRemoveLockDirectory(lockPath, cleanupError) Then TestSupport.RecordTestFailure "TestMdlExcel.TestRealWorkbookRoundTripAndFakeLock: lock cleanup failed: " & cleanupError.Message & " " & cleanupError.Context
+    End If
+    If Len(root) > 0 Then
+        If Not RemoveLocalWorkspace(root, cleanupError) Then TestSupport.RecordTestFailure "TestMdlExcel.TestRealWorkbookRoundTripAndFakeLock: workspace cleanup failed: " & cleanupError.Message & " " & cleanupError.Context
+    End If
+    On Error GoTo 0
+    If failureNumber <> 0 Then Err.Raise failureNumber, "TestMdlExcel.TestRealWorkbookRoundTripAndFakeLock", failureDescription
+End Sub
+
+Private Sub CreateRealTestWorkbook(ByVal workbookPath As String)
+    Dim fixture As Workbook
+    Dim sheet As Worksheet
+    Dim failureNumber As Long
+    Dim failureDescription As String
+
+    On Error GoTo Failed
+    Set fixture = Application.Workbooks.Add(XL_WBAT_WORKSHEET)
+    Set sheet = fixture.Worksheets.Item(1)
+    sheet.Name = "MdlExcelFixture"
+    FillHeaders sheet
+    FillFixtureRows sheet
+    fixture.SaveAs Filename:=workbookPath, FileFormat:=XL_OPEN_XML_WORKBOOK
+    fixture.Close SaveChanges:=False
+    Exit Sub
+
+Failed:
+    failureNumber = Err.Number
+    failureDescription = Err.Description
+    On Error Resume Next
+    If Not fixture Is Nothing Then fixture.Close SaveChanges:=False
+    On Error GoTo 0
+    Err.Raise failureNumber, "TestMdlExcel.CreateRealTestWorkbook", failureDescription
+End Sub
+
+Private Sub VerifyRealWorkbookRoundTrip(ByVal workbookPath As String)
+    Dim handleId As String
+    Dim targets As Variant
+    Dim snapshot As SnapshotData
+    Dim mergedValues As Variant
+    Dim mergedFonts As Variant
+    Dim mergedFills As Variant
+    Dim parsedKind As String
+    Dim parsedText As String
+    Dim emptyCellFont As String
+    Dim runs As Variant
+    Dim errorInfo As AppErrorInfo
+    Dim errorInfo2 As AppErrorInfo
+    Dim failureNumber As Long
+    Dim failureDescription As String
+
+    On Error GoTo Failed
+    targets = OneSheetTarget("MdlExcelFixture", "AMG_Value")
+    AssertTrue OpenWorkbookHandle(workbookPath, WorkbookSharedRemote, handleId, errorInfo), "MdlExcel should import a real local XLSX through the shared-workbook path. " & errorInfo.Message
+    AssertTrue ReadDeclaredSnapshot(handleId, targets, snapshot, errorInfo), "The real XLSX data should be read through MdlExcel. " & errorInfo.Message
+    AssertEqual CStr(snapshot.Values(4, 4)), "VALUE_4", "The real workbook import returned an unexpected cell value."
+    AssertTrue ParseTextFontData(CStr(snapshot.Fonts(4, 4)), parsedKind, parsedText, runs, emptyCellFont, errorInfo), "The imported text/font snapshot should parse. " & errorInfo.Message
+
+    mergedValues = snapshot.Values
+    mergedFonts = snapshot.Fonts
+    mergedFills = snapshot.Fills
+    mergedValues(4, 4) = "EDITED4"
+    mergedFonts(4, 4) = BuildTextFontData(mergedValues(4, 4), runs, emptyCellFont, errorInfo2)
+    AssertTrue Len(CStr(mergedFonts(4, 4))) > 0, "The value edit should retain the real workbook's font mapping. " & errorInfo2.Message
+    AssertTrue WriteDeclaredColumns(handleId, targets, mergedValues, mergedFonts, mergedFills, errorInfo), "The real XLSX should accept a declared-column edit. " & errorInfo.Message
+    AssertTrue SaveWorkbook(handleId, errorInfo), "MdlExcel should persist the edit with Workbook.Save. " & errorInfo.Message
+    CloseWorkbookHandle handleId, False
+    handleId = vbNullString
+
+    AssertTrue OpenWorkbookHandle(workbookPath, WorkbookSharedRemote, handleId, errorInfo), "The saved XLSX should reopen through MdlExcel. " & errorInfo.Message
+    AssertTrue ReadDeclaredSnapshot(handleId, targets, snapshot, errorInfo), "The reopened XLSX snapshot should read. " & errorInfo.Message
+    AssertEqual CStr(snapshot.Values(4, 4)), "EDITED4", "The saved cell value did not survive closing and reopening."
+    CloseWorkbookHandle handleId, False
+    Exit Sub
+
+Failed:
+    failureNumber = Err.Number
+    failureDescription = Err.Description
+    If Len(handleId) > 0 Then CloseWorkbookHandle handleId, False
+    Err.Raise failureNumber, "TestMdlExcel.VerifyRealWorkbookRoundTrip", failureDescription
+End Sub
+
+Private Sub VerifyRealWorkbookLockConflict(ByVal workbookPath As String, ByRef lockPath As String)
+    Dim owner As CLockCoordinator
+    Dim contender As CLockCoordinator
+    Dim lockTargets As Variant
+    Dim leases As Variant
+    Dim contenderLeases As Variant
+    Dim targetFields As Variant
+    Dim ownerPath As String
+    Dim status As LockAvailability
+    Dim errorInfo As AppErrorInfo
+
+    Set owner = New CLockCoordinator
+    Set contender = New CLockCoordinator
+    lockTargets = OneLockTarget(workbookPath, "MdlExcelFixture", "AMG_Value")
+    targetFields = LockTargetAt(lockTargets, 1)
+    AssertTrue owner.AcquireLocks(lockTargets, "excel-owner", leases, errorInfo), "A lock should be created beside the real test workbook. " & errorInfo.Message
+    lockPath = CStr(leases(1, 1))
+    ownerPath = lockPath & "\owner.txt"
+    AssertTrue InStr(1, lockPath, "\history\mddtlock\MDDTREALFIXTURE.XLSX\", vbTextCompare) > 0, "The real lock should use the readable shared history layout."
+    AssertFalse contender.AcquireLocks(lockTargets, "excel-contender", contenderLeases, errorInfo), "A second session should be blocked by the owner file on disk."
+    AssertTrue contender.InspectTargetLock(targetFields, status, errorInfo), "The on-disk owner should be inspectable."
+    AssertEqual CStr(status), CStr(LockHeld), "A valid owner file should report a held lock."
+
+    AssertTrue StorageWriteText(ownerPath, "damaged fake owner", errorInfo), "The test should be able to replace the temporary owner record."
+    AssertTrue contender.InspectTargetLock(targetFields, status, errorInfo), "A damaged fake owner should remain an inspectable lock state."
+    AssertEqual CStr(status), CStr(LockUnknown), "A damaged owner file must fail closed as an unknown lock."
+    AssertFalse contender.AcquireLocks(lockTargets, "excel-after-damage", contenderLeases, errorInfo), "A damaged fake lock must still block acquisition."
 End Sub
 
 Private Sub TestHeartbeatScheduling()
@@ -188,6 +326,24 @@ Private Function OneSheetTarget(ByVal sheetName As String, ByVal amgHeader As St
     result(1, 1) = sheetName
     result(1, 2) = amgHeader
     OneSheetTarget = result
+End Function
+
+Private Function OneLockTarget(ByVal workbookPath As String, ByVal sheetName As String, ByVal amgHeader As String) As Variant
+    Dim result(1 To 1, 1 To 3) As Variant
+    result(1, 1) = workbookPath
+    result(1, 2) = sheetName
+    result(1, 3) = amgHeader
+    OneLockTarget = result
+End Function
+
+Private Function LockTargetAt(ByRef targets As Variant, ByVal rowIndex As Long) As Variant
+    Dim result(1 To 3) As Variant
+    Dim columnIndex As Long
+
+    For columnIndex = 1 To 3
+        result(columnIndex) = targets(rowIndex, columnIndex)
+    Next columnIndex
+    LockTargetAt = result
 End Function
 
 Private Sub AssertTrue(ByVal condition As Boolean, ByVal message As String)

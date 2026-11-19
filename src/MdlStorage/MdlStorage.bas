@@ -182,7 +182,7 @@ InvalidInput:
     errorInfo = MakeAppError(STORAGE_ERR_INVALID, "MdlStorage.CreateLocalWorkspace", "A safe session identifier and LOCALAPPDATA path are required.")
 End Function
 
-Public Function CopySharedFileToWorkspace(ByVal sourceUncPath As String, ByVal workspacePath As String, ByRef localPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function CopyWorkbookToWorkspace(ByVal sourcePath As String, ByVal workspacePath As String, ByRef localPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim normalizedSource As String
     Dim fileName As String
     Dim slashAt As Long
@@ -190,7 +190,7 @@ Public Function CopySharedFileToWorkspace(ByVal sourceUncPath As String, ByVal w
 
     localPath = vbNullString
     On Error GoTo Failed
-    If Not ValidateUncPath(sourceUncPath, normalizedSource, errorInfo) Then Exit Function
+    If Not ValidateWorkbookPath(sourcePath, normalizedSource, errorInfo) Then Exit Function
     If Not IsLocalAppDataPath(workspacePath) Or Not IsDirectory(workspacePath) Then GoTo InvalidInput
     If Not PathExists(normalizedSource, attributes) Or (attributes And vbDirectory) = vbDirectory Then GoTo InvalidInput
     slashAt = InStrRev(normalizedSource, "\")
@@ -199,18 +199,18 @@ Public Function CopySharedFileToWorkspace(ByVal sourceUncPath As String, ByVal w
     localPath = JoinPath(workspacePath, fileName)
     If PathExists(localPath) Then GoTo InvalidInput
     FileCopy normalizedSource, localPath
-    CopySharedFileToWorkspace = True
-    errorInfo = MakeAppError(ERR_NONE, "MdlStorage.CopySharedFileToWorkspace", "")
+    CopyWorkbookToWorkspace = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlStorage.CopyWorkbookToWorkspace", "")
     Exit Function
 
 InvalidInput:
     localPath = vbNullString
-    errorInfo = MakeAppError(STORAGE_ERR_INVALID, "MdlStorage.CopySharedFileToWorkspace", "The source must be an existing UNC file and the workspace must be local.", sourceUncPath)
+    errorInfo = MakeAppError(STORAGE_ERR_INVALID, "MdlStorage.CopyWorkbookToWorkspace", "The source must be an existing workbook file and the workspace must be local.", sourcePath)
     Exit Function
 
 Failed:
     localPath = vbNullString
-    errorInfo = MakeAppError(STORAGE_ERR_IO, "MdlStorage.CopySharedFileToWorkspace", "The shared file could not be copied to the local workspace.", CStr(Err.Number) & ": " & Err.Description)
+    errorInfo = MakeAppError(STORAGE_ERR_IO, "MdlStorage.CopyWorkbookToWorkspace", "The workbook could not be copied to the local workspace.", CStr(Err.Number) & ": " & Err.Description)
 End Function
 
 Public Function RemoveLocalWorkspace(ByVal workspacePath As String, ByRef errorInfo As AppErrorInfo) As Boolean
