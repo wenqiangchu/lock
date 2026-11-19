@@ -6,7 +6,7 @@ from xml.etree import ElementTree
 
 CUSTOM_UI_NS = "http://schemas.microsoft.com/office/2009/07/customui"
 RELATIONSHIP_TYPE = "http://schemas.microsoft.com/office/2007/relationships/ui/extensibility"
-CONTENT_TYPE = "application/vnd.ms-office.customUI+xml"
+CONTENT_TYPE = "application/xml"
 EXPECTED_ACTIONS = {"RibbonStartEdit", "RibbonSubmit", "RibbonAbandon"}
 
 

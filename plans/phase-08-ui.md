@@ -73,13 +73,15 @@ Private Function CConflictReviewEvents.ReadConflictBounds(ByRef conflicts As Var
 
 - `test/MdlUI/TestMdlUI.bas` 用内存数据覆盖 Ribbon 状态映射、冲突选择矩阵、未完成选择拒绝、空值/换行/长字符串显示格式及 A/E/AA 列地址转换，不读取 Excel 对象。
 - Excel UI 集成测试验证开始编辑、提交、放弃按钮路径；冲突窗体每格只允许 Local/Remote，逐项选择后才完成，取消或关闭后共享文件未写且会话/列锁仍在。
-- 当前已通过 Excel 16.0 build 19127 隔离项目编译和 MdlUI 内存测试；实际 Ribbon 装载、鼠标逐项选择、关闭窗体及共享文件未写入等 UI 集成路径仍需 Phase 9 验收。
+- `.xlam` 包结构检查必须要求 `/customUI/customUI14.xml` 的 Content Type 为 `application/xml`；只检查 Ribbon 关系、部件存在和回调名称不足以证明 Excel 会呈现功能区。
+- 2026-11-19 在 Office 2019 Version 2508 (Build 19127.20860) 对照验证：原包的 Ribbon 未出现；仅将临时副本的 Ribbon Content Type 改为 `application/xml` 后，Excel 显示 `MDDT Collaboration` 选项卡。随后通过 Excel 加载项 Browse 启用正式包 `MDDTLockIssue-ribbon-fix-20261119.xlam`，正式包也显示该选项卡；旧包和临时探测包未启用。
+- 当前已通过 Excel 16.0 build 19127 隔离项目编译和 MdlUI 内存测试，正式包结构测试及标签加载通过。此冒烟测试仅确认加载与标签呈现；三个按钮的点击、窗体交互、共享文件未写入等 UI 集成路径仍需 Phase 9 验收。
 - 覆盖空目标、重复目标、锁冲突提示、长值/空值显示、连续多个冲突、重复点击和窗体异常关闭。
 - UI 测试使用专用工作簿并设置超时；计划编写阶段不启动编译进程。
 
 ## 6. 风险与未决问题
 
 - **冲突很多时逐格窗体的导航和性能尚无数量上限。** 当前单格逐项呈现并提供上一项/下一项及已裁决计数，不增加全量差异预览；需在试用中确认是否易用。
-- **Office Forms 运行时和 Ribbon 包装尚需实际 UI 实测。** `.xlam` 包结构已通过构建检查，但尚未在 Excel 用户界面实际装载并操作；若目标环境禁用 Forms 或 Ribbon XML 未正确装入，签出/裁决界面不可用，Phase 9 必须做加载验收。
+- **Office Forms 运行时和 Ribbon 操作尚未完整验收。** 正式包的 Ribbon 标签已在本机 Office 2019 中确认可加载，且 Content Type 必须为 `application/xml`；按钮点击、Forms 窗体以及目标环境策略仍需 Phase 9 实测。
 - 冲突值按字符串原样显示，换行仅标准化显示；空值以“（空白）”标记。当前合同只允许字符串与 Empty，因此不提供日期、错误值或其他类型的编辑/裁决路径。
 - 锁冲突时提示导致失败的 sheet/AMG 列；按已确认策略整组取消，不提供跳过占用列继续。

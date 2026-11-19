@@ -9,7 +9,7 @@
 ## 2. 实现方式
 
 - 按依赖顺序构建：Phase 1–4 纯逻辑/基础组件，Phase 5–6 锁和 Excel 适配，Phase 7–8 生命周期与 UI，最后用 `tools/Build-Addin.ps1` 打包并按干净用户配置验证加载项。脚本将输出路径规范化，并限制在仓库 `build/` 目录内；路径校验需兼容 Windows PowerShell 5.1 所用的 .NET Framework。
-- 构建脚本在隔离 Excel 进程中导入源码和 Office 自带 Forms 引用，生成初始 `.xlam`；生成包后用 XML/ZIP API 注入 `src/MdlUI/ribbon.xml` 并验证 `vbaProject.bin`、Ribbon 关系、内容类型和三个回调。Excel `SaveAs` 仅用于首次创建加载项包；共享业务文件运行时保存仍只用 `Save()`。
+- 构建脚本在隔离 Excel 进程中导入源码和 Office 自带 Forms 引用，生成初始 `.xlam`；生成包后用 XML/ZIP API 注入 `src/MdlUI/ribbon.xml` 并验证 `vbaProject.bin`、Ribbon 关系、`/customUI/customUI14.xml` 的 `application/xml` Content Type 和三个回调。包结构测试必须与 Excel 实际显示 Ribbon 标签的冒烟测试配合；仅结构自检不能替代宿主应用加载验证。Excel `SaveAs` 仅用于首次创建加载项包；共享业务文件运行时保存仍只用 `Save()`。
 - 用合成工作簿和隔离共享目录执行端到端测试。至少两台 Windows 客户端同时运行，确保测试数据不包含生产数据或真实 UNC/服务器标识。
 - 验证不同 sheet+AMG 列锁可并行；不同会话可以编辑同一 sheet 的不同列；提交期间通过 Phase 5 的短期提交门闩串行访问共享工作簿。相同锁冲突必须被拒绝。
 - 覆盖整组签出失败回滚、Local/Remote 冲突逐格选择、全部裁决前不写共享、取消后本地会话/列锁保留、仅声明列写回、Save 成功/失败、放弃、锁过期与失联客户端。
@@ -52,8 +52,8 @@ test/tools/test_probe_xlsx_structure.py
 - 故障场景：UNC 不可达、权限不足、锁目录/owner 损坏、复制失败、工作簿打开失败、写入/Save 失败或结果不确定、进程超时/退出、清理失败。每次验证本地数据保留与锁状态符合计划。
 - 验收记录不提交真实路径、账号、服务器名或业务内容；测试后确认 Excel/VBA 进程已结束，清理临时工作簿和本地/共享测试目录。
 - Phase 2/6 的锚点和数据行边界结论必须区分“合成/隔离样例验证”与“代表性模板实测”；没有代表性模板时，M4 不得标记生产就绪。
-- 2026-11-19 本机验证：VBA 聚合测试在 Excel 16.0 build 19127 通过；Excel 合成边界探测通过；OpenXML 脱敏结构测试通过；当前源码构建的 `.xlam` 已通过包结构检查，输出路径逃逸也被拒绝。
-- 当前未验收：代表性业务模板、至少两个独立 Windows 客户端的 Samba 并发、真实 Ribbon 装载/点击流程、干净用户环境加载和共享 Save 失败结果。上述项目是 Phase 9 外部验收阻塞，不表示本地构建/测试失败。
+- 2026-11-19 本机验证：VBA 聚合测试在 Excel 16.0 build 19127 通过；Excel 合成边界探测和 OpenXML 脱敏结构测试通过；修复后的正式包 `MDDTLockIssue-ribbon-fix-20261119.xlam` 通过 `test/tools/test_addin_package.py` 检查，并在 Office 2019 Version 2508 (Build 19127.20860) 中加载后显示 `MDDT Collaboration` 标签。加载测试中旧包和临时探测包均未启用，临时探测文件已删除。
+- 当前未验收：代表性业务模板、至少两个独立 Windows 客户端的 Samba 并发、Ribbon 按钮与窗体完整交互、干净用户环境加载和共享 Save 失败结果。上述项目仍是 Phase 9 验收项；本机验证只证明正式包结构正确且宿主 Excel 显示 Ribbon 标签，不表示端到端流程或生产环境验收完成。
 
 ## 6. 风险与未决问题
 

@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:RibbonContentType = "application/xml"
 
 function Release-ComObject {
     param([object]$Value)
@@ -56,11 +57,11 @@ function Add-RibbonPart {
         if ($null -eq $override) {
             $override = $contentTypes.CreateElement("Override", $contentTypes.DocumentElement.NamespaceURI)
             [void]$override.SetAttribute("PartName", "/customUI/customUI14.xml")
-            [void]$override.SetAttribute("ContentType", "application/vnd.ms-office.customUI+xml")
+            [void]$override.SetAttribute("ContentType", $script:RibbonContentType)
             [void]$contentTypes.DocumentElement.AppendChild($override)
         }
         else {
-            [void]$override.SetAttribute("ContentType", "application/vnd.ms-office.customUI+xml")
+            [void]$override.SetAttribute("ContentType", $script:RibbonContentType)
         }
         Set-XmlEntry $archive "[Content_Types].xml" $contentTypes
 
@@ -101,7 +102,7 @@ function Test-AddinPackage {
 
         $contentTypes = Get-XmlEntry $archive "[Content_Types].xml"
         $override = $contentTypes.SelectSingleNode("/*[local-name()='Types']/*[local-name()='Override' and @PartName='/customUI/customUI14.xml']")
-        if ($null -eq $override -or $override.GetAttribute("ContentType") -ne "application/vnd.ms-office.customUI+xml") {
+        if ($null -eq $override -or $override.GetAttribute("ContentType") -ne $script:RibbonContentType) {
             throw "The Ribbon content type is missing or invalid."
         }
         $relationships = Get-XmlEntry $archive "_rels/.rels"
