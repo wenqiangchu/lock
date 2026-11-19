@@ -11,28 +11,53 @@
 - `MdlSession` 维护 `Idle → TargetSelected → CheckingOut → CheckedOut` 与 `CheckedOut → Committing ↔ ConflictReview → Committing → Idle` 状态；取消裁决或提交失败回到 `CheckedOut`，放弃经过 `Aborting` 回到 `Idle`。
 - 签出时校验目标 schema，按整组取得列锁，创建本地工作区/副本，打开本地副本并读取 Base。任一步骤失败时按相反顺序回滚本次资源，不形成半个活动会话。
 - 编辑时不访问共享文件、不挂单元格 `Change` 事件；周期性续约锁。续约失败或 fencing 校验失败时标记会话不可提交，但保留本地文件供用户恢复。
-- 提交时先验证会话、锁和结构；取得共享提交互斥后读取 Remote，调用 Diff/Merge。存在冲突时释放短期提交互斥并进入 `ConflictReview`；UI 返回全部选择后重新验证锁/结构并重新读取 Remote，避免裁决期间 Remote 再次变化被覆盖。
+- `SubmitChanges` 校验活动会话与全部列锁后取得共享提交门闩，打开 Remote 并逐 sheet 读取 Local/Remote 快照；对 Base/Local 调用 `MdlDiff`，再由 `MdlMerge` 计算逐格结果。冲突通过纯 Variant 矩阵返回，列为 `[sheet, physicalRow, physicalColumn, base, local, remote]`，不暴露 Excel 对象。
+- 初次发现冲突时关闭 Remote 且释放提交门闩，保留本地副本、会话和列锁并进入 `ConflictReview`。UI 的选择矩阵为 `[sheet, physicalRow, physicalColumn, "LOCAL"|"REMOTE"]`。恢复裁决时重新读取 Remote 并重新合并；只有冲突坐标及 Base/Local/Remote 值均与上次展示完全相同，才接受选择。冲突集合或值已变化时返回新列表并继续等待裁决，不写共享文件。
 - 用户取消裁决时不得写共享工作簿，回到 `CheckedOut`，保留本地会话和列锁。全部冲突解决后才允许声明列写回和 `Save()`；成功确认后关闭句柄、释放列锁并清理本地工作区。
+- 写入前和 `Save()` 前再次校验全部列租约及提交门闩。写入按 sheet/声明列执行；保存异常一律标记为结果不确定，保留本地工作区与锁且禁止盲目重试。提交成功但本地清理或释放锁失败时，向调用方返回“提交完成但清理有警告”，不得把清理错误伪装成提交失败或完全成功。
 - 放弃前由 UI 确认丢弃；关闭本地副本不保存，释放锁并清理工作区。各清理失败要记录具体未完成项，不得报告为完全成功。
 
 ## 3. 涉及函数与模块
 
-模块：`src/MdlSession/`，按 `AGENTS.md` 可协调各底层模块；不直接访问 Excel 对象。
+模块：`src/MdlSession/`，按 `AGENTS.md` 可协调各底层模块；不直接访问 Excel 对象。续约决策由会话状态机负责，定时回调由 `MdlExcel.ScheduleSessionHeartbeat` 注册、`MdlExcel.CancelSessionHeartbeat` 取消。
 
-建议过程接口：
+当前过程接口：
 
 ```text
-Public Function BeginCheckout(targets As Variant, ByRef err As AppErrorInfo) As Boolean
-Public Function SubmitChanges(ByRef conflicts As Variant, ByRef err As AppErrorInfo) As SubmitOutcome
-Public Function ResumeAfterConflictReview(choices As Variant, ByRef err As AppErrorInfo) As SubmitOutcome
+Public Function BeginCheckout(ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function GetAvailableTargets(ByRef targets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function SubmitChanges(ByRef conflicts As Variant, ByRef errorInfo As AppErrorInfo) As SubmitOutcome
+Public Function ResumeAfterConflictReview(ByRef choices As Variant, ByRef conflicts As Variant, ByRef errorInfo As AppErrorInfo) As SubmitOutcome
 Public Function CancelConflictReview() As Boolean
-Public Function AbandonSession(userConfirmed As Boolean, ByRef err As AppErrorInfo) As Boolean
+Public Function AbandonSession(ByVal userConfirmed As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
 Public Function GetSessionView() As SessionView
-Private Function TransitionTo(nextState As SessionState, ByRef err As AppErrorInfo) As Boolean
-Private Sub RollbackCheckout(acquiredLeases As Variant, localHandle As String, workspace As String)
+Public Sub SessionHeartbeat()
+Public Function IsSessionTransitionAllowed(ByVal currentState As SessionState, ByVal nextState As SessionState) As Boolean
+Private Sub ScheduleHeartbeat()
+Private Sub CancelHeartbeat()
+Private Function TransitionTo(ByVal nextState As SessionState, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview As Boolean, ByRef conflicts As Variant, ByRef errorInfo As AppErrorInfo) As SubmitOutcome
+Private Function BuildCurrentMerges(ByVal remoteHandle As String, ByRef merges() As MergeResult, ByRef conflicts As Variant, ByRef hasLocalChanges As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ValidateSessionLeases(ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ValidateCommitAuthority(ByRef gateFields As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ConflictViewsEqual(ByRef leftConflicts As Variant, ByRef rightConflicts As Variant) As Boolean
+Private Function ApplySessionConflictChoices(ByRef merges() As MergeResult, ByRef choices As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Sub RollbackCheckout(ByRef errorInfo As AppErrorInfo)
+Private Function ReleaseSessionResources(ByRef errorInfo As AppErrorInfo) As Boolean
+Private Sub ResetSession()
 ```
 
-会话数据至少保存 session ID、状态、目标列清单、Base/结构指纹、锁 lease、工作区路径和本地/远端句柄 ID；不得把 Excel 对象传给 `MdlUI`。
+目标输入归一化与多 sheet 分组由以下私有过程完成：
+
+```text
+Private Function NormalizeTargets(ByRef targets As Variant, ByVal expectedFile As String, ByRef normalizedTargets As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function BuildTargetGroups(ByRef targets As Variant, ByRef sheetNames As Variant, ByRef groupTargets As Variant, ByRef groupCount As Long, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function FindSheetIndex(ByRef names() As String, ByVal groupCount As Long, ByVal sheetName As String) As Long
+```
+
+会话数据至少保存 session ID、状态、目标列清单、Base/结构指纹、锁 lease、工作区路径和本地句柄 ID；远端句柄仅在提交门闩持有期间短暂存在。冲突矩阵的值是原始 Variant 值，UI 只提交冲突坐标和 Local/Remote 标签，不从显示文本反向解析数据。不得把 Excel 对象传给 `MdlUI`。
+
+`GetAvailableTargets` 返回 N×4 纯 Variant 矩阵 `[UNC, sheet, AMG header, lock status]`，只枚举可解析且含 AMG 列的 sheet。锁状态是只读提示，未知状态按不可确认展示；真正签出仍由整组锁获取决定。
 
 ## 4. 功能范围
 
@@ -42,13 +67,14 @@ Private Sub RollbackCheckout(acquiredLeases As Variant, localHandle As String, w
 
 ## 5. 测试方案
 
-- `test/MdlSession/` 先用替身接口测试合法/非法状态迁移、签出各步失败回滚、整组锁失败不留部分会话、续约失败禁提交。
-- Excel 集成测试覆盖签出→改值→无冲突提交、冲突进入裁决、取消裁决不写共享且保留本地和锁、裁决完成后仅声明列写回、提交失败保留数据、放弃确认与取消。
+- `test/MdlSession/` 对合法/非法状态迁移、Idle 状态拒绝提交/放弃和 `SessionView` 按状态计算做内存级测试；Excel 集成测试覆盖签出→改值→无冲突提交、无本地改动不写共享、冲突进入裁决、取消裁决不写共享且保留本地和锁、Remote 在裁决期间变化后重显冲突、裁决完成后仅声明列写回、提交失败保留数据、放弃确认与取消。
 - 覆盖重复点击、状态中提交/放弃、结构变化、锁过期、写入/保存/清理失败；Excel 进程和测试均必须受控超时。
+- 当前 `test/MdlSession/TestMdlSession.bas` 仅覆盖状态迁移、Idle 操作拒绝和 `SessionView`；完整 UNC 签出/提交场景尚未实现为可运行测试，需依赖 Phase 9 的真实共享环境验收。
+- 本地 Excel 集成 runner 不等价于 UNC/Samba 多客户端验收；无法连接受控共享时记录为 Phase 9 阻塞，不以模拟测试替代。
 
 ## 6. 风险与未决问题
 
 - **冲突裁决期间 Remote 可能继续变化。** 暂定裁决结束后重新读取 Remote，并基于原 Base/最新 Local/新 Remote 再合并；若冲突集合变化则重新展示，不直接套用过期选择。需确认该重复裁决行为的用户体验。
-- **保存报错不一定等价于共享文件未改变。** 暂定将其视为结果不确定：保留本地工作区与列锁，禁止盲目重试；重新读取 Remote 并校验后才能继续。需在 Phase 9 确认错误分类与解除方式。
-- **本地崩溃残留的恢复/清理规则未定。** 暂按下次启动发现未完成 manifest 时保留文件、记录会话信息并提示人工处理，不自动删除或自动提交；需回来确认是否需要恢复入口和最长保留期。
+- **保存报错不一定等价于共享文件未改变。** 暂按结果不确定处理：保留本地工作区与列锁、禁用再次提交，不自动重试；当前没有安全的自动恢复入口，用户需核对共享文件后明确放弃或由后续版本恢复。Phase 9 需在真实 SMB 上验证可观察结果和操作指引。
+- **本地崩溃后的会话恢复尚未实现。** 当前状态只保存在 Excel 进程内存中；Excel/进程崩溃后不恢复会话或自动清理工作区，锁依赖租约过期。工作区保留策略与人工恢复入口仍待确认，Phase 9 需记录残留文件和锁过期行为。
 - 多列锁冲突按已确认的整组取消执行。不同列同时提交通过 Phase 5 的短期提交门闩串行处理，避免共享工作簿同时保存；门闩只覆盖共享访问阶段，不阻止并行本地编辑。

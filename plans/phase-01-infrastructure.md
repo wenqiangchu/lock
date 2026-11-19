@@ -17,19 +17,29 @@
 
 ## 3. 涉及函数与模块
 
+为后续会话目录和 fencing 标记提供本地路径守卫与 GUID 生成：EnsureLocalAppDirectory 只允许在 LOCALAPPDATA 下建立目录；IsLocalAppDataPath 只做路径归属校验；NewGuidString 调用 Windows GUID API，生成失败返回空字符串，由调用方立即中止，不退化成低熵随机值。
+
 模块：`src/MdlInfra/`，不新增产品层依赖。
 
-建议过程接口：
+当前过程接口：
 
 ```text
-Public Sub LogWrite(level As LogLevel, source As String, message As String)
-Public Function MakeAppError(code As Long, message As String, context As String) As AppErrorInfo
-Public Function ReadConfig(configPath As String, ByRef config As AppConfig, ByRef err As AppErrorInfo) As Boolean
-Public Function WriteConfig(configPath As String, config As AppConfig, ByRef err As AppErrorInfo) As Boolean
-Public Function ValidateUncPath(path As String, ByRef normalizedPath As String, ByRef err As AppErrorInfo) As Boolean
-Public Function ResolvePathToUnc(path As String, ByRef uncPath As String, ByRef err As AppErrorInfo) As Boolean
-Public Function ProbeUncLatency(path As String, ByRef elapsedMs As Double, ByRef err As AppErrorInfo) As Boolean
-Public Function CompareCellValues(leftValue As Variant, rightValue As Variant, ByRef equal As Boolean, ByRef err As AppErrorInfo) As Boolean
+Public Sub LogWrite(ByVal level As LogLevel, ByVal source As String, ByVal message As String)
+Public Function MakeAppError(ByVal code As Long, ByVal source As String, ByVal message As String, Optional ByVal context As String = "") As AppErrorInfo
+Public Function NewGuidString() As String
+Public Function EnsureLocalAppDirectory(ByVal path As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function IsLocalAppDataPath(ByVal path As String) As Boolean
+Public Function GetLocalAppDataFolder() As String
+Public Function GetDefaultConfigPath() As String
+Public Function ValidateUncPath(ByVal path As String, ByRef normalizedPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ResolvePathToUnc(ByVal path As String, ByRef uncPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ReadConfig(ByVal configPath As String, ByRef config As AppConfig, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function WriteConfig(ByVal configPath As String, ByRef config As AppConfig, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ProbeUncLatency(ByVal path As String, ByRef elapsedMs As Double, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function CompareCellValues(ByVal leftValue As Variant, ByVal rightValue As Variant, ByRef equal As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function EnsureLocalDirectory(ByVal path As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function EnsureDirectoryTree(ByVal path As String) As Boolean
+Private Function IsUnderLocalAppData(ByVal path As String) As Boolean
 ```
 
 `AppConfig` 只包含 UNC 主文件路径及本阶段确有必要的版本字段；不在此阶段加入用户偏好或业务状态。`AppErrorInfo` 至少表达模块来源、稳定错误码和面向上层的说明。
@@ -42,10 +52,12 @@ Public Function CompareCellValues(leftValue As Variant, rightValue As Variant, B
 
 ## 5. 测试方案
 
-- `test/MdlInfra/`：UNC 有效/无效形式、盘符拒绝写入配置、UNC 解析失败、配置缺失/损坏、日志目录不可写、字符串精确比较、大小写/空格差异、`Empty` 与 `""`、数字/布尔/错误值拒绝。
+- 覆盖 LOCALAPPDATA 路径守卫对父目录穿越的拒绝，并检查 Windows GUID 格式与连续生成不重复。配置拒绝路径测试不得创建目标文件。
+
+- `test/MdlInfra/`：UNC 有效/无效形式、盘符拒绝写入配置、UNC 解析失败、配置缺失/损坏、日志目录不可写、字符串精确比较、大小写/空格差异、`Empty` 与 `""`、数字/布尔/错误值拒绝。VBA 测试由 `test/TestSupport.bas` 捕获断言错误并返回给 `tools/Run-VbaTests.ps1`，避免隐藏 Excel 因未处理错误停在模态对话框；测试逻辑不访问工作簿对象。
 - 路径和配置测试使用内存或本机临时目录；延迟探测的共享路径测试单独标记环境前提，且只测已有目标。
 - 覆盖空字符串、尾部分隔符、大小写、权限不足和 I/O 失败；验证日志失败不会覆盖原始业务错误。
-- 不需要 Excel，不启动 Excel/VBA 编译进程。
+- 测试输入只使用内存数据或 `%LOCALAPPDATA%` 下的本机临时配置；不打开 Excel 工作簿、不访问 Excel 对象模型，也不访问真实共享。当前 VBA runner 使用受控隐藏 Excel 作为 VBA 执行宿主，并设置硬超时及进程清理。
 
 ## 6. 风险与未决问题
 

@@ -8,3 +8,7 @@ These are **not** the source of truth. Anything here that contradicts
 The completed preparation-phase research (design reasoning, measured
 verification records, test findings) is archived under `prepare/` and is
 kept read-only.
+
+Reproducible implementation probes may be documented under `docs/probes/`.
+Scripts belong in `tools/` or regression tests in `test/`; accepted project
+rules and decisions must also be stated in `plans/`.

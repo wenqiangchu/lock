@@ -8,6 +8,10 @@
 
 ## 2. 实现方式
 
+- 锁目标输入为 N × 3 Variant 矩阵（UNC 文件路径、sheet 名、AMG 表头）。按大小写归一后的完整目标键排序，并以稳定短哈希生成目录名；owner 元数据保存完整目标键，遇到哈希碰撞即失败关闭。owner 文件包含 session ID、GUID fencing token 和版本，过期时间根据共享 owner 文件的最后写入时间计算。
+- 暂定列锁 TTL 为 300 秒、续约间隔 60 秒，提交门闩 TTL 为 600 秒；这是需 Phase 9 在目标 Samba 上验证的保守初值。失联、损坏 owner 或时间无法读取均按占用处理。过期回收先将锁目录改名为唯一回收目录，再删除其中的 owner 元数据和空目录。
+- 锁协调实现放在 MdlLock 下的 CLockCoordinator 类中；MdlLock 标准模块只暴露产品入口。类仅向同一 VBA 工程提供 Friend 测试入口以注入 LOCALAPPDATA 临时根目录，生产入口不接受本地路径覆盖参数。
+
 - `MdlLock` 管理锁语义，`MdlStorage` 封装目录/文件系统操作，`MdlInfra` 提供错误与日志。调用方提供已规范化的 sheet/AMG 锁目标，锁键包含 UNC 主文件标识、sheet 名和单个 AMG 列名；`MdlLock` 不依赖 `MdlSchema`。
 - 用 `MkDir` 对锁目录的创建竞争进行互斥；锁目录中的 `owner.txt` 记录会话标识、所有者、创建/续约时间及 fencing 标识。续约更新固定心跳记录，不创建新的共享临时文件。
 - 批量锁按规范化键排序后逐一尝试，避免不同顺序造成互相等待。任一目标失败时，释放本次已取得的锁并整体失败，不保留部分签出；不跳过被占用的列。
@@ -18,27 +22,49 @@
 
 ## 3. 涉及函数与模块
 
-模块：`src/MdlLock/`（依赖 `MdlInfra`、`MdlStorage`）；`src/MdlStorage/`（依赖 `MdlInfra`）。
+模块：`src/MdlLock/MdlLock.bas` 对外提供锁操作，`src/MdlLock/CLockCoordinator.cls` 持有协调器实现（依赖 `MdlInfra`、`MdlStorage`）；`src/MdlStorage/`（依赖 `MdlInfra`）。
 
-建议过程接口：
+当前模块接口：
 
 ```text
-Public Function AcquireLocks(targets As Variant, sessionId As String, ByRef leases As Variant, ByRef err As AppErrorInfo) As Boolean
-Public Function RenewLocks(leases As Variant, ByRef renewed As Boolean, ByRef err As AppErrorInfo) As Boolean
-Public Function ValidateLease(lease As LockLease, ByRef valid As Boolean, ByRef err As AppErrorInfo) As Boolean
-Public Function ReleaseLocks(leases As Variant, ByRef failures As Variant) As Boolean
-Public Function TryReclaimExpiredLock(target As LockTarget, ByRef reclaimed As Boolean, ByRef err As AppErrorInfo) As Boolean
-Public Function AcquireCommitGate(fileKey As String, sessionId As String, ByRef gate As CommitLease, ByRef err As AppErrorInfo) As Boolean
-Public Function ReleaseCommitGate(gate As CommitLease, ByRef err As AppErrorInfo) As Boolean
-Public Function StorageCreateDirectory(path As String, ByRef created As Boolean, ByRef err As AppErrorInfo) As Boolean
-Public Function StorageReadOwner(path As String, ByRef owner As LockOwner, ByRef err As AppErrorInfo) As Boolean
-Public Function StorageWriteHeartbeat(path As String, timestamp As Date, ByRef err As AppErrorInfo) As Boolean
-Public Function CreateLocalWorkspace(sessionId As String, ByRef workspacePath As String, ByRef err As AppErrorInfo) As Boolean
-Public Function CopySharedFileToWorkspace(sourceUncPath As String, workspacePath As String, ByRef localPath As String, ByRef err As AppErrorInfo) As Boolean
-Public Function RemoveLocalWorkspace(workspacePath As String, ByRef err As AppErrorInfo) As Boolean
+Public Function AcquireLocks(ByRef targets As Variant, ByVal sessionId As String, ByRef leases As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function RenewLocks(ByRef leases As Variant, ByRef renewed As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ValidateLease(ByRef leaseFields As Variant, ByRef valid As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function InspectLockStatus(ByRef targetFields As Variant, ByRef status As LockAvailability, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ReleaseLocks(ByRef leases As Variant, ByRef failures As Variant) As Boolean
+Public Function TryReclaimExpiredLock(ByRef targetFields As Variant, ByRef reclaimed As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function AcquireCommitGate(ByVal fileKey As String, ByVal sessionId As String, ByRef gateFields As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ValidateCommitGate(ByRef gateFields As Variant, ByRef valid As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ReleaseCommitGate(ByRef gateFields As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StorageCreateDirectory(ByVal path As String, ByRef created As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StoragePathExists(ByVal path As String, ByRef exists As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StorageReadText(ByVal path As String, ByRef contents As String, ByRef lastWrite As Date, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StorageWriteText(ByVal path As String, ByVal contents As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StorageRenameDirectory(ByVal sourcePath As String, ByVal destinationPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function StorageRemoveLockDirectory(ByVal path As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function CreateLocalWorkspace(ByVal sessionId As String, ByRef workspacePath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function CopySharedFileToWorkspace(ByVal sourceUncPath As String, ByVal workspacePath As String, ByRef localPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function RemoveLocalWorkspace(ByVal workspacePath As String, ByRef errorInfo As AppErrorInfo) As Boolean
 ```
 
-`LockLease` 向会话返回目标键、owner/session 标识和不可由调用方构造的 fencing 标识；上层不直接拼接锁目录结构。
+`CLockCoordinator` 的内部接口与关键私有过程：
+
+```text
+Friend Function InspectTargetLock(ByRef targetFields As Variant, ByRef status As LockAvailability, ByRef errorInfo As AppErrorInfo) As Boolean
+Friend Sub SetTestRoot(ByVal path As String)
+Friend Sub SetTestTtl(ByVal columnSeconds As Long, ByVal gateSeconds As Long)
+Friend Sub SetTestClockOffset(ByVal seconds As Long)
+Private Function BuildTargetKey(ByVal fileKey As String, ByVal sheetName As String, ByVal amgHeader As String, ByRef targetKey As String, ByRef lockPath As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function TryAcquireLockDirectory(ByVal lockPath As String, ByVal targetKey As String, ByVal sessionId As String, ByVal ttlSeconds As Long, ByRef fencingToken As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ReclaimLockDirectory(ByVal lockPath As String, ByVal expectedKey As String, ByVal ttlSeconds As Long, ByRef reclaimed As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ValidateLeaseScalars(ByVal lockPath As String, ByVal targetKey As String, ByVal sessionId As String, ByVal fencingToken As String, ByVal ttlSeconds As Long, ByRef valid As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function HashKey(ByVal value As String) As String
+Private Sub SortTargetOrder(ByRef order() As Long, ByRef targetKeys() As String, ByVal targetCount As Long)
+```
+
+`SetTestRoot`、`SetTestTtl`、`SetTestClockOffset` 仅由同工程测试调用，不对加载项外部开放；`MdlLock.InspectLockStatus` 通过 `Friend InspectTargetLock` 获取只读状态，其余锁操作仍经标准模块门面进入。
+
+lease 为 N × 4 Variant 矩阵，列依次为锁路径、完整目标键、session ID 和 fencing token；ValidateLease 接收其中一行的一维数组。commit gate 为一维四项数组（路径、完整目标键、session ID、token）。`InspectLockStatus` 是只读提示，返回空闲、有效占用、过期或未知；损坏 owner/权限错误按未知占用展示，不回收锁。签出时的 `AcquireLocks` 仍是唯一权威判定，状态展示和实际获取之间允许发生竞争。
 
 ## 4. 功能范围
 
@@ -48,13 +74,16 @@ Public Function RemoveLocalWorkspace(workspacePath As String, ByRef err As AppEr
 
 ## 5. 测试方案
 
-- `test/MdlLock/` 与 `test/MdlStorage/`：同键竞争仅一方成功、不同列均可成功、批量中途冲突后回滚已取得锁、重复续约/释放、owner 不匹配、过期与未过期、损坏 owner、权限不足、目录删除失败、并发回收竞争、提交门闩串行获取、工作区路径位于 `%LOCALAPPDATA%`、复制/清理失败。
+- `test/MdlLock/` 与 `test/MdlStorage/`：当前组件测试覆盖同键竞争、不同列独立、批量冲突回滚、续约、owner/token 不匹配、过期回收、损坏 owner 保留、提交门闩串行获取和本地工作区约束。权限不足、并发回收竞态、Samba 时间戳/目录原子性与真实双客户端场景留到 Phase 9。
 - 使用本地临时目录做组件测试；对 `MkDir` 原子性及实际 Samba 时间戳/删除语义标注为 Phase 9 双客户端验证前提。
 - 检查失败路径没有留下本次会话持有的锁；无法证明安全回收时必须拒绝接管。
+- 所有锁/存储组件测试在 `Cleanup` 路径删除本次创建的本地临时根目录，并将锁释放/目录删除失败写入测试结果；测试结束后检查 `%LOCALAPPDATA%\MDDTLock\tests` 无本次遗留目录。
+- 2026-11-19 本轮验证：`TestMdlStorage.RunMdlStorageTests`、`TestMdlLock.RunMdlLockInspectStatusTest`、`TestMdlLock.RunMdlLockTests` 和完整 `TestSuite.RunAllVbaTests` 均在 Excel 16.0 build 19127 的受控 runner 中通过。runner 对 Excel 退出使用 20 秒硬宽限，完成后未发现遗留 Excel 进程。被超时中止的早期诊断运行曾留下本地锁目录，已通过范围受限清理移除；锁/存储测试的成功和失败路径现统一清理自身临时根目录。Samba 并发语义仍待 Phase 9 外部验证。
 
 ## 6. 风险与未决问题
 
 - 多列签出策略已确认：任一目标校验或锁获取失败都整组取消，释放本次已取得锁，不跳过占用列。
-- **TTL、续约间隔与过期判据未在总计划给定。** 暂以可配置常量表达，过期时间须大于续约间隔并容忍短时 SMB 延迟；具体数值需在 Phase 9 真实环境验收前确认。
+- **租约参数是待实测初值，不是生产结论。** 当前暂定列锁 TTL 300 秒、续约间隔 60 秒、提交门闩 TTL 600 秒；以 owner 元数据最后写入时间超过 TTL 判为过期。Phase 9 需在目标 Samba 环境验证时间戳精度、客户端时钟偏差和长时间保存行为后确认或调整。无法可靠读取时间戳时按仍被占用处理。
 - **提交门闩的租约与列锁的生命周期边界未定。** 暂定门闩只覆盖共享 Remote 读取、写回和 `Save()`，失败/超时走同一 fencing 校验并释放门闩；需由 Phase 9 真实 SMB 并发测试确认是否足以防止互相覆盖。
 - Samba 上 `MkDir` 原子性、目录时间戳精度和删除行为需实机验证；验证失败前不能宣称崩溃锁可自动回收。
+- 锁状态检查和本地存储测试的自动化挂起/退出问题尚未定位；需先复现并修复，随后重跑完整锁、存储和聚合测试。

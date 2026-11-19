@@ -9,22 +9,25 @@
 ## 2. 实现方式
 
 - 输入为按 product 锚点对齐且结构一致的内存数组：签出快照 Base、本地当前值 Local、提交时读取的最新共享值 Remote，以及声明列集合。锚点列值用于确定同一业务行，不参与写回；锚点唯一性依赖业务前置条件，不重复检测。
+- 每次调用只处理一个 sheet；三个快照均为按物理行号、物理列号索引的 2D Variant 矩阵，空数据集用 Empty 表示。合并结果保存合并矩阵、N × 5 冲突矩阵（物理行、物理列、Base、Local、Remote）、冲突总数、待裁决数和完成标志。
 - 对每个声明单元格使用 `MdlInfra.CompareCellValues` 比较字符串/空白哨兵，再按规则处理：Local=Base 时取 Remote；Remote=Base 时取 Local；Local=Remote 时取共同值；三者均不同则记录冲突并等待用户裁决。非声明列不参与结果写入集合。
-- 冲突记录包含 sheet/行/列定位信息以及 Base、Local、Remote 三值；模块不生成 UI 字符串，也不持有 Excel 对象。
+- 合并模块冲突记录包含物理行/列定位及 Base、Local、Remote 三值；工作表名由 MdlSession 聚合时补入。模块不生成 UI 字符串，也不持有 Excel 对象。
 - 冲突裁决输入是每个冲突单元格的 Local/Remote 选择。任何冲突未选择或选择非法时，返回“未完成”，结果不可提交；全部选择完成后生成最终数组。
+- 选择输入为 N × 3 Variant 矩阵，列依次为物理行、物理列、Local/Remote。应用前先校验数量、坐标、重复项和选项；任何缺选或非法选择均不应用部分裁决。
 - 合并与裁决全程只在内存中进行。只有 `MdlSession` 确认全部裁决完成后，才可推进到写回阶段。
 
 ## 3. 涉及函数与模块
 
 模块：`src/MdlMerge/`，只依赖 `MdlInfra`。
 
-建议过程接口：
+当前过程接口：
 
 ```text
-Public Function MergeThreeWay(baseValues As Variant, localValues As Variant, remoteValues As Variant, declaredColumns As Variant, ByRef result As MergeResult, ByRef err As AppErrorInfo) As Boolean
-Public Function ApplyConflictChoices(ByRef result As MergeResult, choices As Variant, ByRef err As AppErrorInfo) As Boolean
-Public Function IsMergeResolved(result As MergeResult) As Boolean
-Private Function ClassifyCell(baseValue As Variant, localValue As Variant, remoteValue As Variant) As MergeCellOutcome
+Public Function MergeThreeWay(ByRef baseValues As Variant, ByRef localValues As Variant, ByRef remoteValues As Variant, ByRef declaredColumns As Variant, ByRef result As MergeResult, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ApplyConflictChoices(ByRef result As MergeResult, ByRef choices As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function IsMergeResolved(ByRef result As MergeResult) As Boolean
+Private Function ClassifyCell(ByVal baseValue As Variant, ByVal localValue As Variant, ByVal remoteValue As Variant, ByRef errorInfo As AppErrorInfo) As MergeCellOutcome
+Private Sub ResetMergeResult(ByRef result As MergeResult)
 ```
 
 `MergeResult` 包含合并值、冲突清单、待裁决数量和完成标志。公开接口只收发纯数据数组/记录。
@@ -41,6 +44,7 @@ Private Function ClassifyCell(baseValue As Variant, localValue As Variant, remot
 - 对冲突逐一选择 Local/Remote，检查最终值及未选择、重复选择、非法选项、错误索引均不能标记为完成。
 - 验证输入维度不一致、锚点映射不一致或声明列越界时整体失败，不返回可写回的部分结果。
 - 本阶段不启动 Excel；冲突窗体取消后共享文件未写入的集成验证放 Phase 8/9。
+- VBA 测试由 tools/Run-VbaTests.ps1 在受控隐藏 Excel 进程中作为执行宿主运行；合并实现只处理内存矩阵，不访问 Excel 对象模型。
 
 ## 6. 风险与未决问题
 

@@ -8,7 +8,8 @@
 
 ## 2. 实现方式
 
-- 按依赖顺序构建：Phase 1–4 纯逻辑/基础组件，Phase 5–6 锁和 Excel 适配，Phase 7–8 生命周期与 UI，最后打包并按干净用户配置验证加载项。
+- 按依赖顺序构建：Phase 1–4 纯逻辑/基础组件，Phase 5–6 锁和 Excel 适配，Phase 7–8 生命周期与 UI，最后用 `tools/Build-Addin.ps1` 打包并按干净用户配置验证加载项。脚本将输出路径规范化，并限制在仓库 `build/` 目录内；路径校验需兼容 Windows PowerShell 5.1 所用的 .NET Framework。
+- 构建脚本在隔离 Excel 进程中导入源码和 Office 自带 Forms 引用，生成初始 `.xlam`；生成包后用 XML/ZIP API 注入 `src/MdlUI/ribbon.xml` 并验证 `vbaProject.bin`、Ribbon 关系、内容类型和三个回调。Excel `SaveAs` 仅用于首次创建加载项包；共享业务文件运行时保存仍只用 `Save()`。
 - 用合成工作簿和隔离共享目录执行端到端测试。至少两台 Windows 客户端同时运行，确保测试数据不包含生产数据或真实 UNC/服务器标识。
 - 验证不同 sheet+AMG 列锁可并行；不同会话可以编辑同一 sheet 的不同列；提交期间通过 Phase 5 的短期提交门闩串行访问共享工作簿。相同锁冲突必须被拒绝。
 - 覆盖整组签出失败回滚、Local/Remote 冲突逐格选择、全部裁决前不写共享、取消后本地会话/列锁保留、仅声明列写回、Save 成功/失败、放弃、锁过期与失联客户端。
@@ -19,16 +20,21 @@
 
 模块：全部 `MdlInfra`、`MdlStorage`、`MdlSchema`、`MdlDiff`、`MdlMerge`、`MdlLock`、`MdlSession`、`MdlExcel`、`MdlUI`；构建辅助脚本位于 `tools/`。
 
-建议端到端入口：
+当前可运行的本机验证入口：
 
 ```text
-Public Function RunCheckoutCommitScenario(testCase As TestScenario, ByRef result As TestResult) As Boolean
-Public Function RunTwoClientConcurrencyScenario(testCase As ConcurrencyScenario, ByRef result As TestResult) As Boolean
-Public Function VerifyPackage(packagePath As String, ByRef result As PackageCheckResult) As Boolean
-Private Sub CleanupTestArtifacts(testWorkspace As String, startedProcessIds As Variant)
+tools/Run-VbaTests.ps1 [-TestMacro <VBA 宏名>] [-TimeoutSeconds 120]
+Private Invoke-TestWorker(OutputPath, KnownPids, MacroName)
+tools/Build-Addin.ps1 [-OutputPath <build 内的 .xlam 路径>] [-TimeoutSeconds 120]
+Private Build-Workbook(PackagePath, KnownPids)
+Private Add-RibbonPart(PackagePath, RibbonPath)
+Private Test-AddinPackage(PackagePath)
+tools/Probe-ExcelBoundary.ps1 [-TimeoutSeconds 60]
+test/tools/test_addin_package.py <package>
+test/tools/test_probe_xlsx_structure.py
 ```
 
-这些是测试/验收驱动接口，不属于运行时产品 API；Excel/VBA 进程的启动、等待、超时和退出检查均由受控测试驱动管理。
+这些脚本不属于加载项运行时 API。当前仓库没有完整签出→提交的 Phase 9 双客户端端到端测试驱动；不可用的真实模板、Samba 共享和交互式 Excel 验收必须继续标记为未验证，不得以建议接口或包结构检查代替。
 
 ## 4. 功能范围
 
@@ -38,15 +44,21 @@ Private Sub CleanupTestArtifacts(testWorkspace As String, startedProcessIds As V
 
 ## 5. 测试方案
 
-- 先运行 `test/MdlInfra/`、`MdlSchema/`、`MdlDiff/`、`MdlMerge/` 的无 Excel 测试，再运行 `MdlStorage/`、`MdlLock/` 组件测试，最后运行 `MdlExcel/`、`MdlSession/`、`MdlUI/` 集成与端到端测试。
+- 运行 `tools/Run-VbaTests.ps1 -TimeoutSeconds 120`；内存逻辑与本地组件测试不读取 Excel 工作簿/对象模型，集成测试使用合成工作簿。
+- 用唯一输出名运行 `tools/Build-Addin.ps1 -OutputPath build/MDDTLockIssue-<run-id>.xlam -TimeoutSeconds 120`，worker 有 120 秒硬超时，随后最多等待 20 秒让隔离 Excel 退出；超时则终止该进程并将构建判为失败。之后运行 `python -B test/tools/test_addin_package.py build/MDDTLockIssue-<run-id>.xlam` 检查 VBA 工程部件、Ribbon 按钮、回调、关系和内容类型。测试后删除本次生成的包。
+- 运行 `tools/Probe-ExcelBoundary.ps1 -TimeoutSeconds 60` 与 `python -B test/tools/test_probe_xlsx_structure.py`；归档样本的匿名结构统计使用 `python -B tools/probe_xlsx_structure.py prepare/测试结果.xlsx prepare/_smoke/schema_probe.xlsx` 复现。
 - 双客户端场景：不同列同时签出并分别提交；同一列竞争；批量目标中一个锁冲突；不同列会话同时提交；一个客户端心跳停止后另一客户端检查过期回收。
-- 数据正确性场景：无冲突、仅 Local 改、仅 Remote 改、同值改动、同格双方不同改动并逐项选 Local/Remote、裁决中取消、Remote 在裁决期再次变化、锚点值/顺序变化阻止写回、结构变化阻止写回、只写声明列、非字符串值/公式拒绝、字符串大小写/空格和空白哨兵比较。
+- 数据正确性场景：无冲突、仅 Local 改、仅 Remote 改、同值改动、同格双方不同改动并逐项选 Local/Remote、裁决中取消、Remote 在裁决期再次变化、锚点值/顺序变化阻止写回、结构变化阻止写回、只写声明列、非字符串值/公式拒绝、字符串大小写/空格和空白哨兵比较、内部全空行保留物理位置、末行空锚点但声明值存在时拒绝写回、格式延伸到末行不扩大数据行边界。
 - 故障场景：UNC 不可达、权限不足、锁目录/owner 损坏、复制失败、工作簿打开失败、写入/Save 失败或结果不确定、进程超时/退出、清理失败。每次验证本地数据保留与锁状态符合计划。
 - 验收记录不提交真实路径、账号、服务器名或业务内容；测试后确认 Excel/VBA 进程已结束，清理临时工作簿和本地/共享测试目录。
+- Phase 2/6 的锚点和数据行边界结论必须区分“合成/隔离样例验证”与“代表性模板实测”；没有代表性模板时，M4 不得标记生产就绪。
+- 2026-11-19 本机验证：VBA 聚合测试在 Excel 16.0 build 19127 通过；Excel 合成边界探测通过；OpenXML 脱敏结构测试通过；当前源码构建的 `.xlam` 已通过包结构检查，输出路径逃逸也被拒绝。
+- 当前未验收：代表性业务模板、至少两个独立 Windows 客户端的 Samba 并发、真实 Ribbon 装载/点击流程、干净用户环境加载和共享 Save 失败结果。上述项目是 Phase 9 外部验收阻塞，不表示本地构建/测试失败。
 
 ## 6. 风险与未决问题
 
 - **真实 Samba 语义与本地模拟存在差异。** `MkDir` 互斥、心跳时间戳、目录删除、共享 `Save()` 期间的读写竞争必须双客户端实测；未通过时不能以 M4 生产就绪验收。
+- **双客户端和代表性业务模板当前可能不可用。** 缺少目标 Samba 共享或经确认的模板时，只能验证本机逻辑、合成 Excel 和包结构；Phase 9 记录为外部环境阻塞，不能把本地测试等同于生产验收。
 - **提交互斥实现及 fencing 的最终边界待验证。** 暂按所有共享工作簿写入串行、每次 Save 前重验 lease/fencing；需确认不同列编辑仍可并行且持锁不会长期占用共享文件。
 - 当前验收只覆盖声明列的单元格值，不测试或宣传格式同步能力。
 - M4 还依赖保存异常后的可判定性、孤儿工作区处理规则、宏策略/加载项注入在目标 Excel 上可用；这些结果应记录为明确通过、失败或待确认，不以计划文档代替实测。
