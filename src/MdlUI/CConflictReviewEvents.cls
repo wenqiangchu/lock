@@ -92,7 +92,7 @@ End Sub
 
 Private Sub mFinishButton_Click()
     If Not AllChoicesMade Then
-        MsgBox "请先为每个冲突单元格选择 Local 或 Remote。", vbInformation, "尚有冲突未裁决"
+        MsgBox "Choose Local or Remote for every conflicting cell.", vbInformation, "Unresolved Conflicts"
         Exit Sub
     End If
     mConfirmed = True
@@ -119,20 +119,20 @@ Private Sub RenderCurrent()
     rowValue = CLng(mConflicts(mCurrentRow, 2))
     columnValue = CLng(mConflicts(mCurrentRow, 3))
     mLocationLabel.Caption = CStr(mConflicts(mCurrentRow, 1)) & "!" & ExcelColumnLabel(columnValue) & CStr(rowValue)
-    mCountLabel.Caption = "冲突 " & CStr(selectionIndex) & " / " & CStr(mRowHigh - mRowLow + 1) & "；已裁决 " & CStr(SelectedCount())
+    mCountLabel.Caption = "Conflict " & CStr(selectionIndex) & " / " & CStr(mRowHigh - mRowLow + 1) & "; resolved " & CStr(SelectedCount())
     mBaseValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 4))
     mLocalValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 5))
     mRemoteValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 6))
     mPreviousButton.Enabled = (mCurrentRow > mRowLow)
     mNextButton.Enabled = (mCurrentRow < mRowHigh)
-    mLocalButton.Caption = ChoiceCaption("保留 Local", mSelections(selectionIndex) = "Local")
-    mRemoteButton.Caption = ChoiceCaption("保留 Remote", mSelections(selectionIndex) = "Remote")
+    mLocalButton.Caption = ChoiceCaption("Keep Local", mSelections(selectionIndex) = "Local")
+    mRemoteButton.Caption = ChoiceCaption("Keep Remote", mSelections(selectionIndex) = "Remote")
     mFinishButton.Enabled = AllChoicesMade
 End Sub
 
 Private Function ChoiceCaption(ByVal caption As String, ByVal selected As Boolean) As String
     If selected Then
-        ChoiceCaption = caption & "（已选）"
+        ChoiceCaption = caption & " (selected)"
     Else
         ChoiceCaption = caption
     End If

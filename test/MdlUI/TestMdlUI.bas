@@ -78,7 +78,7 @@ Private Sub TestConflictChoiceMatrixRejectsIncompleteSelections()
 End Sub
 
 Private Sub TestConflictValueFormatting()
-    AssertEqual FormatConflictValue(Empty), "（空白）", "Empty cells should be recognizable in the conflict view."
+    AssertEqual FormatConflictValue(Empty), "(blank)", "Empty cells should be recognizable in the conflict view."
     AssertEqual FormatConflictValue("first" & vbCrLf & "second"), "first" & vbLf & "second", "Line endings should be normalized without changing content."
     AssertEqual FormatConflictValue(String$(5000, "x")), String$(5000, "x"), "Long values must be displayed without truncation."
     AssertEqual ExcelColumnLabel(1), "A", "The first physical column should use Excel address notation."

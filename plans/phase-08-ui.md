@@ -8,12 +8,12 @@
 
 ## 2. 实现方式
 
-- Ribbon XML 定义三个按钮：“开始编辑”“提交”“放弃”。`MdlUI` 的 Ribbon 回调读取 `MdlSession.GetSessionView` 计算按钮状态，业务操作只调用 `MdlSession` 公共接口。
+- Ribbon XML 定义三个英文按钮：“Start Editing”“Submit”“Abandon”。`MdlUI` 的 Ribbon 回调读取 `MdlSession.GetSessionView` 计算按钮状态，业务操作只调用 `MdlSession` 公共接口。
 - `ShowTargetSelector` 使用 Office 自带 Microsoft Forms 运行时创建模态多选窗体，展示工作表、AMG 列和锁状态；确认后将目标表转换成 `BeginCheckout` 所需的三列矩阵。锁状态可能在确认前变化，签出仍按已确认策略整组获取；任一列竞争失败则整组取消。
 - 冲突窗体一次显示一个单元格的定位及 Base/Local/Remote 三个只读、可滚动值框。用户选择 Local 或 Remote 后转到下一项；所有冲突均有选择后才启用“完成裁决”。完成后生成 `sheet/row/column/choice` 矩阵交给 Session。用户点取消或关闭窗体均调用 `CancelConflictReview`，不触发写回。
 - `ResumeAfterConflictReview` 在写回前重新读取 Remote；若裁决期间冲突集合变化，UI 对新冲突集合重新显示并要求再次确认。直到冲突集合一致且所有选择完整前不调用写入。
 - UI 不访问 `Workbook`/`Worksheet`/`Range`，不做业务判定，不自行释放锁或清理会话。展示数据由 Session 以纯数据结构提供。
-- 用户可见文本使用中文；错误提示说明失败对象、是否保留本地会话及可执行的下一步，不显示未经确认的“提交成功”。
+- 用户可见文本使用英文；错误提示说明失败对象、是否保留本地会话及可执行的下一步，不显示未经确认的提交成功信息。
 
 ## 3. 涉及函数与模块
 

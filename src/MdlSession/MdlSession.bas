@@ -189,7 +189,7 @@ Public Function GetAvailableTargets(ByRef targets As Variant, ByRef errorInfo As
 
 Failed:
     targets = Empty
-    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.GetAvailableTargets", "可签出目标无法安全读取。", CStr(Err.Number) & ": " & Err.Description)
+    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.GetAvailableTargets", "Checkout targets could not be read safely.", CStr(Err.Number) & ": " & Err.Description)
 
 Cleanup:
     If Len(handleId) > 0 Then CloseWorkbookHandle handleId, False
@@ -232,7 +232,7 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
         GoTo InvalidState
     End If
     If Not mCanSubmit Or mSaveResultUncertain Then
-        errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ExecuteCommit", "提交已禁用；请保留本地副本并检查会话状态。")
+        errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ExecuteCommit", "Submission is disabled. Retain the local copy and check the session state.")
         Exit Function
     End If
     If Not TransitionTo(SessionCommitting, errorInfo) Then Exit Function
@@ -251,7 +251,7 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
                 mPendingConflicts = currentConflicts
                 nextState = SessionConflictReview
                 ExecuteCommit = SubmitNeedsConflictReview
-                mStatusText = "共享数据在裁决期间发生变化，请重新检查冲突"
+                mStatusText = "Shared data changed during conflict review. Review the conflicts again."
                 GoTo Cleanup
             End If
             If Not ApplySessionConflictChoices(mergeResults, choices, errorInfo) Then GoTo Cleanup
@@ -259,7 +259,7 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
             mPendingConflicts = currentConflicts
             nextState = SessionConflictReview
             ExecuteCommit = SubmitNeedsConflictReview
-            mStatusText = "需要逐格裁决冲突"
+            mStatusText = "Cell-by-cell conflict review is required."
             GoTo Cleanup
         End If
     Else
@@ -282,8 +282,8 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
     If Not SaveWorkbook(remoteHandle, errorInfo) Then
         mSaveResultUncertain = True
         mCanSubmit = False
-        mStatusText = "共享保存结果不确定；本地副本和列锁已保留，禁止再次提交"
-        errorInfo = MakeAppError(ERR_SESSION_SAVE_UNCERTAIN, "MdlSession.ExecuteCommit", "共享保存结果不确定。请核对共享文件后再决定如何处理本地副本。", errorInfo.Message & " " & errorInfo.Context)
+        mStatusText = "The shared save outcome is uncertain. The local copy and column locks are retained; do not submit again."
+        errorInfo = MakeAppError(ERR_SESSION_SAVE_UNCERTAIN, "MdlSession.ExecuteCommit", "The shared save outcome is uncertain. Verify the shared file before deciding how to handle the local copy.", errorInfo.Message & " " & errorInfo.Context)
         GoTo Cleanup
     End If
 
@@ -292,7 +292,7 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
     GoTo Cleanup
 
 InvalidState:
-    errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "当前会话状态不允许提交。")
+        errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "The current session state does not allow submission.")
     Exit Function
 
 Cleanup:
@@ -314,16 +314,16 @@ Cleanup:
         ResetSession
         If Not cleanupSucceeded Or Not gateReleaseSucceeded Then
             If cleanupError.Code = ERR_NONE And Not gateReleaseSucceeded Then cleanupError = gateError
-            If cleanupError.Code = ERR_NONE Then cleanupError = MakeAppError(ERR_IO, "MdlSession.ExecuteCommit", "提交已完成，但本地会话清理未全部完成。")
+            If cleanupError.Code = ERR_NONE Then cleanupError = MakeAppError(ERR_IO, "MdlSession.ExecuteCommit", "Submission completed, but local session cleanup is incomplete.")
             errorInfo = cleanupError
             ExecuteCommit = SubmitCompletedWithCleanupWarning
         Else
             errorInfo = MakeAppError(ERR_NONE, "MdlSession.ExecuteCommit", "")
         End If
     ElseIf mState = SessionCommitting Then
-        If errorInfo.Code = ERR_NONE Then errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "提交未完成，会话和本地副本已保留。")
+        If errorInfo.Code = ERR_NONE Then errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "Submission did not complete. The session and local copy have been retained.")
         If Not TransitionTo(nextState, cleanupError) Then LogWrite LogError, "MdlSession.ExecuteCommit", cleanupError.Message
-        If nextState = SessionConflictReview Then mStatusText = "需要逐格裁决冲突"
+        If nextState = SessionConflictReview Then mStatusText = "Cell-by-cell conflict review is required."
     End If
     Exit Function
 
@@ -331,10 +331,10 @@ Failed:
     If saveAttempted Then
         mSaveResultUncertain = True
         mCanSubmit = False
-        mStatusText = "共享保存结果不确定；本地副本和列锁已保留，禁止再次提交"
-        errorInfo = MakeAppError(ERR_SESSION_SAVE_UNCERTAIN, "MdlSession.ExecuteCommit", "共享保存过程中发生错误，结果不确定。请核对共享文件。", CStr(Err.Number) & ": " & Err.Description)
+        mStatusText = "The shared save outcome is uncertain. The local copy and column locks are retained; do not submit again."
+        errorInfo = MakeAppError(ERR_SESSION_SAVE_UNCERTAIN, "MdlSession.ExecuteCommit", "An error occurred while saving the shared file; the outcome is uncertain. Verify the shared file.", CStr(Err.Number) & ": " & Err.Description)
     Else
-        errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "提交过程发生错误；本地会话已保留。", CStr(Err.Number) & ": " & Err.Description)
+        errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.ExecuteCommit", "An error occurred during submission; the local session has been retained.", CStr(Err.Number) & ": " & Err.Description)
     End If
     Resume Cleanup
 End Function
@@ -392,7 +392,7 @@ End Sub
 
 Private Function TransitionTo(ByVal nextState As SessionState, ByRef errorInfo As AppErrorInfo) As Boolean
     If Not IsSessionTransitionAllowed(mState, nextState) Then
-        errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.TransitionTo", "请求的会话状态转换不合法。", CStr(mState) & " -> " & CStr(nextState))
+        errorInfo = MakeAppError(ERR_SESSION_INVALID_STATE, "MdlSession.TransitionTo", "The requested session state transition is invalid.", CStr(mState) & " -> " & CStr(nextState))
         Exit Function
     End If
     mState = nextState
@@ -503,7 +503,7 @@ Private Function ValidateSessionLeases(ByRef errorInfo As AppErrorInfo) As Boole
 
 LeaseLost:
     mCanSubmit = False
-    errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ValidateSessionLeases", "列锁已失效或租约记录不完整；提交已停止。")
+    errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ValidateSessionLeases", "A column lock is lost or its lease record is incomplete; submission has stopped.")
 End Function
 
 Private Function ValidateCommitAuthority(ByRef gateFields As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
@@ -513,7 +513,7 @@ Private Function ValidateCommitAuthority(ByRef gateFields As Variant, ByRef erro
     If Not ValidateCommitGate(gateFields, valid, errorInfo) Then Exit Function
     If Not valid Then
         mCanSubmit = False
-        errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ValidateCommitAuthority", "共享提交门闩已失效；提交已停止。")
+        errorInfo = MakeAppError(ERR_SESSION_LOCK_LOST, "MdlSession.ValidateCommitAuthority", "The shared commit gate is no longer valid; submission has stopped.")
         Exit Function
     End If
     ValidateCommitAuthority = True
@@ -606,7 +606,7 @@ Private Function ApplySessionConflictChoices(ByRef merges() As MergeResult, ByRe
     Exit Function
 
 InvalidChoices:
-    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.ApplySessionConflictChoices", "每个冲突必须且只能对应一个 Local 或 Remote 选择。")
+    errorInfo = MakeAppError(ERR_SESSION_INVALID_TARGETS, "MdlSession.ApplySessionConflictChoices", "Every conflict must have exactly one Local or Remote choice.")
 End Function
 
 Private Sub ScheduleHeartbeat()
@@ -735,10 +735,10 @@ End Function
 
 Private Function LockStatusText(ByVal status As LockAvailability) As String
     Select Case status
-        Case LockFree: LockStatusText = "空闲"
-        Case LockHeld: LockStatusText = "已占用"
-        Case LockExpired: LockStatusText = "租约过期，可尝试回收"
-        Case Else: LockStatusText = "未知，签出时验证"
+        Case LockFree: LockStatusText = "Free"
+        Case LockHeld: LockStatusText = "Occupied"
+        Case LockExpired: LockStatusText = "Lease expired; reclaim may be attempted"
+        Case Else: LockStatusText = "Unknown; verified during checkout"
     End Select
 End Function
 

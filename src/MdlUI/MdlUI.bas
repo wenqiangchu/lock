@@ -48,22 +48,22 @@ Public Sub RibbonStartEdit(ByVal control As IRibbonControl)
     On Error GoTo Failed
     If Not GetAvailableTargets(availableTargets, errorInfo) Then GoTo ShowError
     If IsEmpty(availableTargets) Then
-        MsgBox "没有可签出的 AMG 列。", vbInformation, "MDDT 并发编辑"
+        MsgBox "No editable AMG columns are available.", vbInformation, "MDDT Collaboration"
         Exit Sub
     End If
     If Not ShowTargetSelector(availableTargets, selectedTargets) Then Exit Sub
     If Not BeginCheckout(selectedTargets, errorInfo) Then GoTo ShowError
     InvalidateRibbon
-    MsgBox "本地工作副本已打开，可以开始编辑。", vbInformation, "MDDT 并发编辑"
+    MsgBox "The local working copy is open. You can start editing.", vbInformation, "MDDT Collaboration"
     Exit Sub
 
 ShowError:
-    MsgBox errorInfo.Message, vbExclamation, "无法开始编辑"
+    MsgBox errorInfo.Message, vbExclamation, "Unable to Start Editing"
     Exit Sub
 
 Failed:
     LogWrite LogError, "MdlUI.RibbonStartEdit", CStr(Err.Number) & ": " & Err.Description
-    MsgBox "开始编辑时发生错误；请检查日志和会话状态。", vbExclamation, "无法开始编辑"
+    MsgBox "An error occurred while starting the edit session. Check the log and session state.", vbExclamation, "Unable to Start Editing"
 End Sub
 
 Public Sub RibbonSubmit(ByVal control As IRibbonControl)
@@ -78,7 +78,7 @@ Public Sub RibbonSubmit(ByVal control As IRibbonControl)
         If Not ShowConflictReview(conflicts, choices) Then
             Call CancelConflictReview
             InvalidateRibbon
-            MsgBox "已取消冲突裁决。本地副本和列锁仍保留，可以稍后继续提交。", vbInformation, "提交已取消"
+            MsgBox "Conflict review was canceled. The local copy and column locks are retained; you can submit later.", vbInformation, "Submission Canceled"
             Exit Sub
         End If
         outcome = ResumeAfterConflictReview(choices, conflicts, errorInfo)
@@ -87,18 +87,18 @@ Public Sub RibbonSubmit(ByVal control As IRibbonControl)
     InvalidateRibbon
     Select Case outcome
         Case SubmitCompleted
-            MsgBox "提交完成。", vbInformation, "MDDT 并发编辑"
+            MsgBox "Submission complete.", vbInformation, "MDDT Collaboration"
         Case SubmitCompletedWithCleanupWarning
-            MsgBox "共享数据已提交，但本地清理未全部完成。" & vbCrLf & errorInfo.Message, vbExclamation, "提交完成"
+            MsgBox "Shared data was submitted, but local cleanup is incomplete." & vbCrLf & errorInfo.Message, vbExclamation, "Submission Complete"
         Case Else
-            MsgBox errorInfo.Message, vbExclamation, "提交未完成"
+            MsgBox errorInfo.Message, vbExclamation, "Submission Incomplete"
     End Select
     Exit Sub
 
 Failed:
     LogWrite LogError, "MdlUI.RibbonSubmit", CStr(Err.Number) & ": " & Err.Description
     InvalidateRibbon
-    MsgBox "提交过程中发生错误；本地会话状态已保留，请检查会话状态和日志。", vbExclamation, "提交未完成"
+    MsgBox "An error occurred during submission. The local session has been retained. Check the session state and log.", vbExclamation, "Submission Incomplete"
 End Sub
 
 Public Sub RibbonAbandon(ByVal control As IRibbonControl)
@@ -106,12 +106,12 @@ Public Sub RibbonAbandon(ByVal control As IRibbonControl)
     Dim answer As VbMsgBoxResult
 
     On Error GoTo Failed
-    answer = MsgBox("放弃本次编辑并关闭本地副本？未提交的本地改动将被丢弃。", vbQuestion Or vbYesNo, "确认放弃")
+    answer = MsgBox("Abandon this edit session and close the local copy? Unsubmitted local changes will be discarded.", vbQuestion Or vbYesNo, "Confirm Abandon")
     If answer <> vbYes Then Exit Sub
     If Not AbandonSession(True, errorInfo) Then
-        MsgBox errorInfo.Message, vbExclamation, "无法放弃会话"
+        MsgBox errorInfo.Message, vbExclamation, "Unable to Abandon Session"
     Else
-        MsgBox "本次会话已放弃。", vbInformation, "MDDT 并发编辑"
+        MsgBox "This edit session was abandoned.", vbInformation, "MDDT Collaboration"
     End If
     InvalidateRibbon
     Exit Sub
@@ -119,7 +119,7 @@ Public Sub RibbonAbandon(ByVal control As IRibbonControl)
 Failed:
     LogWrite LogError, "MdlUI.RibbonAbandon", CStr(Err.Number) & ": " & Err.Description
     InvalidateRibbon
-    MsgBox "放弃会话时发生错误；请检查会话状态和日志。", vbExclamation, "无法放弃会话"
+    MsgBox "An error occurred while abandoning the session. Check the session state and log.", vbExclamation, "Unable to Abandon Session"
 End Sub
 
 Public Function BuildConflictChoiceMatrix(ByRef conflicts As Variant, ByRef selections As Variant, ByRef choices As Variant) As Boolean
@@ -173,19 +173,19 @@ Public Function FormatConflictValue(ByVal value As Variant) As String
     Dim formatted As String
 
     If IsEmpty(value) Then
-        FormatConflictValue = "（空白）"
+        FormatConflictValue = "(blank)"
         Exit Function
     End If
     If IsNull(value) Then
-        FormatConflictValue = "（无效值）"
+        FormatConflictValue = "(invalid value)"
         Exit Function
     End If
     If IsError(value) Then
-        FormatConflictValue = "（错误值）"
+        FormatConflictValue = "(error value)"
         Exit Function
     End If
     If VarType(value) <> vbString Then
-        FormatConflictValue = "（非字符串值）"
+        FormatConflictValue = "(non-string value)"
         Exit Function
     End If
 
@@ -230,14 +230,14 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
 
     Set form = CreateObject("Forms.UserForm.1")
     With form
-        .Caption = "选择要签出的 AMG 列"
+        .Caption = "Select AMG Columns to Check Out"
         .Width = TARGET_FORM_WIDTH
         .Height = TARGET_FORM_HEIGHT
         .StartUpPosition = 1
     End With
     Set heading = form.Controls.Add("Forms.Label.1", "lblTargetHeading", True)
     With heading
-        .Caption = "工作表 / AMG 列 / 锁状态"
+        .Caption = "Worksheet / AMG Column / Lock Status"
         .Left = 12
         .Top = 10
         .Width = 630
@@ -263,7 +263,7 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
 
     Set acceptButton = form.Controls.Add("Forms.CommandButton.1", "cmdTargetAccept", True)
     With acceptButton
-        .Caption = "开始编辑"
+        .Caption = "Start Editing"
         .Left = 424
         .Top = 366
         .Width = 105
@@ -272,7 +272,7 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
     End With
     Set cancelButton = form.Controls.Add("Forms.CommandButton.1", "cmdTargetCancel", True)
     With cancelButton
-        .Caption = "取消"
+        .Caption = "Cancel"
         .Left = 544
         .Top = 366
         .Width = 105
@@ -304,7 +304,7 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
 Failed:
     ShowTargetSelector = False
     LogWrite LogError, "MdlUI.ShowTargetSelector", CStr(Err.Number) & ": " & Err.Description
-    MsgBox "目标选择窗体无法打开。没有开始签出。", vbExclamation, "无法选择目标"
+    MsgBox "Unable to open the target selector. Checkout was not started.", vbExclamation, "Unable to Select Targets"
 
 Cleanup:
     On Error Resume Next
@@ -335,7 +335,7 @@ Private Function ShowConflictReview(ByRef conflicts As Variant, ByRef choices As
     If Not IsArray(conflicts) Then Exit Function
     Set form = CreateObject("Forms.UserForm.1")
     With form
-        .Caption = "逐格裁决冲突"
+        .Caption = "Review Cell Conflicts"
         .Width = CONFLICT_FORM_WIDTH
         .Height = CONFLICT_FORM_HEIGHT
         .StartUpPosition = 1
@@ -346,13 +346,13 @@ Private Function ShowConflictReview(ByRef conflicts As Variant, ByRef choices As
     Set localValue = AddValueBox(form, "txtLocalValue", "Local", 12, 160)
     Set remoteValue = AddValueBox(form, "txtRemoteValue", "Remote", 12, 258)
 
-    Set previousButton = AddButton(form, "cmdPrevious", "上一项", 12, 384, 92)
-    Set nextButton = AddButton(form, "cmdNext", "下一项", 116, 384, 92)
-    Set localButton = AddButton(form, "cmdChooseLocal", "保留 Local", 224, 384, 130)
-    Set remoteButton = AddButton(form, "cmdChooseRemote", "保留 Remote", 370, 384, 130)
-    Set finishButton = AddButton(form, "cmdFinish", "完成裁决", 516, 384, 130)
+    Set previousButton = AddButton(form, "cmdPrevious", "Previous", 12, 384, 92)
+    Set nextButton = AddButton(form, "cmdNext", "Next", 116, 384, 92)
+    Set localButton = AddButton(form, "cmdChooseLocal", "Keep Local", 224, 384, 130)
+    Set remoteButton = AddButton(form, "cmdChooseRemote", "Keep Remote", 370, 384, 130)
+    Set finishButton = AddButton(form, "cmdFinish", "Apply Choices", 516, 384, 130)
     finishButton.Default = True
-    Set cancelButton = AddButton(form, "cmdCancel", "取消", 516, 422, 130)
+    Set cancelButton = AddButton(form, "cmdCancel", "Cancel", 516, 422, 130)
     cancelButton.Cancel = True
 
     Set handlers = New CConflictReviewEvents
@@ -366,7 +366,7 @@ Private Function ShowConflictReview(ByRef conflicts As Variant, ByRef choices As
 Failed:
     ShowConflictReview = False
     LogWrite LogError, "MdlUI.ShowConflictReview", CStr(Err.Number) & ": " & Err.Description
-    MsgBox "冲突裁决窗体无法打开。共享文件尚未写入，本地会话仍保留。", vbExclamation, "无法裁决冲突"
+    MsgBox "Unable to open conflict review. No shared data was written; the local session is retained.", vbExclamation, "Conflict Review Unavailable"
 
 Cleanup:
     On Error Resume Next

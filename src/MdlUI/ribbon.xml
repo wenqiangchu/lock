@@ -1,11 +1,11 @@
 <customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" onLoad="RibbonOnLoad">
   <ribbon>
     <tabs>
-      <tab id="tabMddtLock" label="MDDT 协作">
-        <group id="grpMddtLock" label="并发编辑">
-          <button id="btnStartEdit" label="开始编辑" imageMso="TableSelect" size="large" onAction="RibbonStartEdit" getEnabled="RibbonGetEnabled" screentip="签出 AMG 列" supertip="选择要在本地副本中编辑的工作表和 AMG 列。" />
-          <button id="btnSubmit" label="提交" imageMso="FileSave" size="large" onAction="RibbonSubmit" getEnabled="RibbonGetEnabled" screentip="合并并提交" supertip="比较本地改动和共享版本，并裁决单元格冲突。" />
-          <button id="btnAbandon" label="放弃" imageMso="Cancel" size="large" onAction="RibbonAbandon" getEnabled="RibbonGetEnabled" screentip="放弃本地编辑" supertip="关闭本地副本并释放本次会话的列锁。" />
+      <tab id="tabMddtLock" label="MDDT Collaboration">
+        <group id="grpMddtLock" label="Concurrent Editing">
+          <button id="btnStartEdit" label="Start Editing" imageMso="TableSelect" size="large" onAction="RibbonStartEdit" getEnabled="RibbonGetEnabled" screentip="Check out AMG columns" supertip="Select worksheets and AMG columns to edit in a local copy." />
+          <button id="btnSubmit" label="Submit" imageMso="FileSave" size="large" onAction="RibbonSubmit" getEnabled="RibbonGetEnabled" screentip="Merge and submit" supertip="Compare local changes with the shared version and review cell conflicts." />
+          <button id="btnAbandon" label="Abandon" imageMso="Cancel" size="large" onAction="RibbonAbandon" getEnabled="RibbonGetEnabled" screentip="Discard local edits" supertip="Close the local copy and release this session's column locks." />
         </group>
       </tab>
     </tabs>

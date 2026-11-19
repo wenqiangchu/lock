@@ -38,7 +38,7 @@ Private Sub mAcceptButton_Click()
         End If
     Next itemIndex
     If Not anySelected Then
-        MsgBox "请至少选择一个 AMG 列。", vbInformation, "未选择目标"
+        MsgBox "Select at least one AMG column.", vbInformation, "No Targets Selected"
         Exit Sub
     End If
     mAccepted = True

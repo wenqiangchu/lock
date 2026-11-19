@@ -160,7 +160,7 @@ Public Function ListWorksheetNames(ByVal handleId As String, ByRef sheetNames As
 
 Failed:
     sheetNames = Empty
-    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.ListWorksheetNames", "工作表清单无法安全读取。", CStr(Err.Number) & ": " & Err.Description)
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.ListWorksheetNames", "The worksheet list could not be read safely.", CStr(Err.Number) & ": " & Err.Description)
 End Function
 
 Public Function ReadSheetSchema(ByVal handleId As String, ByVal sheetName As String, ByRef schema As SheetSchema, ByRef errorInfo As AppErrorInfo) As Boolean
