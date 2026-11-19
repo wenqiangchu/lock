@@ -1,8 +1,8 @@
 # MDDT Checkout Tool
 
-A VBA `.xlam` add-in that turns a single shared Excel workbook into a
-"check out -> edit locally -> commit" workflow, so a small project group can
-edit the same file without one person blocking everyone else.
+A VBA `.xlam` add-in for checking out, editing locally, and committing changes
+to shared Excel workbooks. The planned workflow supports multiple configured
+workbooks while each edit session operates on one selected workbook.
 
 ## Read this first
 
@@ -18,7 +18,7 @@ edit the same file without one person blocking everyone else.
 
 ## Non-negotiable constraints
 
-- Single shared file; it must not be split per owner.
+- Each workbook has one shared master; it must not be split into per-owner business copies.
 - Pure VBA add-in; no runtime dependencies, no admin rights.
 - No M365 / SharePoint / OneDrive.
 - Local working copy lives in `%LOCALAPPDATA%`, never in `Documents`/`Desktop`
@@ -29,8 +29,22 @@ edit the same file without one person blocking everyone else.
 
 ## Status
 
-Phase 0 (project initialisation) complete. Next: Phase 1 (infrastructure).
-See `plans/PLAN.md` section 9.
+The current packaged add-in is still the original single-path version. The
+multi-workbook configuration and workbook selector are planned but not yet
+implemented. See `plans/PLAN.md` section 10 for current status and section 3
+for the intended workflow.
+
+The current build requires a manually maintained file at
+`%LOCALAPPDATA%\MDDTLock\config.ini`. Create the `MDDTLock` folder if needed.
+Its current single-workbook format is:
+
+```ini
+Version=1
+MainFilePath=\\server\share\folder\workbook.xlsx
+```
+
+Replace the example with the actual UNC path. The planned version 2 multi-path
+format is not supported by the current add-in build.
 
 ## Repository layout
 
