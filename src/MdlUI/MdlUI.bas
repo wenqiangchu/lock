@@ -89,7 +89,7 @@ Private Function ShowWorkbookSelector(ByRef paths As Variant, ByRef selectedPath
     On Error GoTo Failed
     If Not GetVectorBounds(paths, lowerBound, upperBound) Then Exit Function
 
-    Set form = CreateObject("Forms.UserForm.1")
+    Set form = New frmMddtDialog
     With form
         .Caption = "Select Workbook"
         .Width = TARGET_FORM_WIDTH
@@ -331,7 +331,7 @@ Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTarg
     If Not GetMatrixBounds(targets, rowLow, rowHigh, columnLow, columnHigh) Then Exit Function
     If columnHigh - columnLow + 1 <> 4 Then Exit Function
 
-    Set form = CreateObject("Forms.UserForm.1")
+    Set form = New frmMddtDialog
     With form
         .Caption = "Select AMG Columns to Check Out"
         .Width = TARGET_FORM_WIDTH
@@ -436,7 +436,7 @@ Private Function ShowConflictReview(ByRef conflicts As Variant, ByRef choices As
     choices = Empty
     On Error GoTo Failed
     If Not IsArray(conflicts) Then Exit Function
-    Set form = CreateObject("Forms.UserForm.1")
+    Set form = New frmMddtDialog
     With form
         .Caption = "Review Cell Conflicts"
         .Width = CONFLICT_FORM_WIDTH

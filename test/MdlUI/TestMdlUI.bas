@@ -2,11 +2,24 @@ Attribute VB_Name = "TestMdlUI"
 Option Explicit
 
 Public Sub RunMdlUITests()
+    TestDialogFormInstantiation
     TestRibbonEnabledMapping
     TestConflictChoiceMatrix
     TestConflictChoiceMatrixRejectsIncompleteSelections
     TestConflictValueFormatting
     TestConflictFormattingPreview
+End Sub
+
+Private Sub TestDialogFormInstantiation()
+    Dim form As frmMddtDialog
+    Dim label As Object
+
+    Set form = New frmMddtDialog
+    form.Caption = "MDDT test dialog"
+    Set label = form.Controls.Add("Forms.Label.1", "lblRuntimeTest", True)
+    label.Caption = "Ready"
+    AssertEqual CStr(label.Caption), "Ready", "The dialog host should accept runtime controls."
+    Unload form
 End Sub
 
 Private Sub TestRibbonEnabledMapping()

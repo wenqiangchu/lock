@@ -70,11 +70,17 @@ public static class VbaTestNative {
             if ([string]$reference.Guid -eq $formsGuid) { $formsReference = $reference; break }
         }
         if ($null -eq $formsReference) { [void]$project.References.AddFromGuid($formsGuid, 2, 0) }
+        $dialogForm = $components.Add(3)
+        $dialogForm.Name = "frmMddtDialog"
+        $dialogForm.Properties.Item("Caption").Value = "MDDT Test Dialog"
+        $dialogForm.Properties.Item("StartUpPosition").Value = 1
+        Release-ComObject $dialogForm
+        $dialogForm = $null
 
         $sourceRoot = Join-Path $rootPath "src"
         $testRoot = Join-Path $rootPath "test"
         $files = @()
-        foreach ($extension in @(".bas", ".cls", ".frm")) {
+        foreach ($extension in @(".bas", ".cls")) {
             $files += Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Filter "*$extension"
             $files += Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter "*$extension"
         }

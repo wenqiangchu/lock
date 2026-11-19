@@ -209,7 +209,7 @@ Phase 2/3 可并行；Phase 5/6 可并行。
 
 ## 十、当前状态
 
-截至 2026-11-19，最新 `tools/Run-VbaTests.ps1 -TimeoutSeconds 120` 在 Excel 16.0 build 19127 通过，包含格式协议、组件 Diff/Merge、UI 矩阵和合成工作簿局部字体/填充读写回环；测试结束后隔离 Excel 进程已退出。最新源码通过 `tools/Build-Addin.ps1` 构建临时 `.xlam`，生成的 15 个 VBA 组件、3 个 Ribbon 按钮及回调通过构建内检查和 `test_addin_package.py` 检查，临时包已删除。格式同步代码现已贯通 MdlInfra、MdlDiff、MdlMerge、MdlExcel、MdlSession 和冲突 UI。此前正式包 `MDDTLockIssue-ribbon-fix-20261119.xlam` 的 Ribbon 标签已在 Office 2019 Version 2508 (Build 19127.20860) 验证，但它不包含本轮格式同步代码；最新源码包尚未在目标用户环境加载。尚未用真实代表性模板记录格式性能，也未在目标 Excel 中点击验证新冲突窗体；完整 UNC 签出→提交、共享 `Save()` 失败行为和双客户端 Samba 并发仍未验收，M2–M4 不标为生产就绪。
+截至 2026-11-20，`tools/Run-VbaTests.ps1 -TimeoutSeconds 120` 在 Excel 16.0 build 19127 全套通过（27 个工程组件），测试后隔离 Excel 进程已退出；`python -B test/tools/test_addin_package.py build/MDDTLockIssue-form-fix-20261120.xlam` 通过。UserForm 的 `CreateObject("Forms.UserForm.1")` 在真实调用中报错 429，现已改为 `New frmMddtDialog`，并由构建/测试脚本通过 VBA 工程 API 创建该 UserForm 容器。修复包在本机交互 Excel 中加载时无宏安全提示，Ribbon 标签和按钮可见；“Start Editing”可显示工作簿选择窗体，取消后关闭且没有访问测试 UNC 占位路径。该结果排除了本机宏被禁用作为此次窗体失败原因，并验证 Ribbon 与工作簿选择窗体的基本交互；不覆盖目标选择、冲突裁决或完整签出→提交。格式同步代码已贯通 MdlInfra、MdlDiff、MdlMerge、MdlExcel、MdlSession 和冲突 UI。尚未用真实代表性模板记录格式性能；完整 UNC 签出→提交、共享 `Save()` 失败行为和双客户端 Samba 并发仍未验收，M2–M4 不标为生产就绪。
 
 准备阶段（Phase 0 之前）已完成的工作，详见 `prepare/`：
 
@@ -245,3 +245,4 @@ Phase 2/3 可并行；Phase 5/6 可并行。
 | 2026-11-19 | 将范围扩展为多工作簿清单、单工作簿会话并补充配置维护与打开失败分类 | 用户确认需维护多个分散的共享文件；记录手工配置现状，并避免把只读状态误判成确定锁冲突 |
 | 2026-11-19 | 确认配置只接受 UNC，并拒绝映射盘符 | 统一所有客户端使用的共享文件标识，避免路径别名导致锁与提交门闩分裂 |
 | 2026-11-19 | 实现多工作簿配置、手工维护流程、工作簿选择和共享路径错误分类 | 让用户可在多个 UNC 工作簿中单选会话目标，并在开始签出前反馈可判定的路径故障 |
+| 2026-11-20 | 修复 UserForm 429 并实测 Ribbon 与工作簿选择窗体 | 工程 API 创建 `frmMddtDialog` 后，真实 Excel 可显示窗体；全套 VBA 测试和 XLAM 包检查通过 |

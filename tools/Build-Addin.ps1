@@ -162,6 +162,20 @@ public static class MddtAddinBuildNative {
         }
         if ($null -eq $formsReference) { [void]$project.References.AddFromGuid($formsGuid, 2, 0) }
 
+        $dialogFormName = "frmMddtDialog"
+        $dialogForm = $null
+        foreach ($component in $components) {
+            if ([string]$component.Name -eq $dialogFormName) { $dialogForm = $component; break }
+        }
+        if ($null -eq $dialogForm) {
+            $dialogForm = $components.Add(3)
+            $dialogForm.Name = $dialogFormName
+            $dialogForm.Properties.Item("Caption").Value = "MDDT Dialog"
+            $dialogForm.Properties.Item("StartUpPosition").Value = 1
+        }
+        Release-ComObject $dialogForm
+        $dialogForm = $null
+
         $sourceRoot = Join-Path $rootPath "src"
         $files = @()
         foreach ($extension in @(".bas", ".cls", ".frm")) {
