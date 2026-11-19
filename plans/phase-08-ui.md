@@ -31,7 +31,7 @@ Public Sub RibbonAbandon(ByVal control As IRibbonControl)
 Public Function IsRibbonButtonEnabled(ByVal buttonId As String, ByRef view As SessionView) As Boolean
 Public Function BuildConflictChoiceMatrix(ByRef conflicts As Variant, ByRef selections As Variant, ByRef choices As Variant) As Boolean
 Public Function FormatConflictValue(ByVal value As Variant) As String
-Public Function FormatConflictComponent(ByVal componentName As String, ByRef value As Variant, ByRef displayValue As String) As Boolean
+Public Function FormatConflictComponent(ByVal componentName As String, ByVal value As Variant) As String
 Public Function ExcelColumnLabel(ByVal columnIndex As Long) As String
 Private Function ShowWorkbookSelector(ByRef paths As Variant, ByRef selectedPath As String) As Boolean
 Private Function ShowTargetSelector(ByRef targets As Variant, ByRef selectedTargets As Variant) As Boolean
@@ -44,7 +44,7 @@ Public Property Get CTargetSelectorEvents.Accepted() As Boolean
 Public Property Get CTargetSelectorEvents.SelectedIndex() As Long
 Private Sub CTargetSelectorEvents.mAcceptButton_Click()
 Private Sub CTargetSelectorEvents.mCancelButton_Click()
-Public Sub CConflictReviewEvents.Bind(ByVal formObject As Object, ByRef conflicts As Variant, ByVal locationLabel As Object, ByVal componentLabel As Object, ByVal countLabel As Object, ByVal basePreview As Object, ByVal localPreview As Object, ByVal remotePreview As Object, ByVal previousButton As Object, ByVal nextButton As Object, ByVal localButton As Object, ByVal remoteButton As Object, ByVal finishButton As Object, ByVal cancelButton As Object)
+Public Sub CConflictReviewEvents.Bind(ByVal formObject As Object, ByRef conflicts As Variant, ByVal locationLabel As Object, ByVal countLabel As Object, ByVal baseValue As Object, ByVal localValue As Object, ByVal remoteValue As Object, ByVal previousButton As Object, ByVal nextButton As Object, ByVal localButton As Object, ByVal remoteButton As Object, ByVal finishButton As Object, ByVal cancelButton As Object)
 Public Property Get CConflictReviewEvents.Confirmed() As Boolean
 Public Property Get CConflictReviewEvents.ChoiceMatrix() As Variant
 Private Sub CConflictReviewEvents.SelectChoice(ByVal choice As String)
@@ -75,7 +75,9 @@ Private Function CConflictReviewEvents.ReadConflictBounds(ByRef conflicts As Var
 
 ## 5. 测试方案
 
-- `test/MdlUI/TestMdlUI.bas` 用内存数据覆盖 Ribbon 状态映射、包含组件名的冲突选择矩阵、未完成选择拒绝、空值/换行/长字符串显示、字体 run 与填充预览格式化及 A/E/AA 列地址转换，不读取 Excel 对象。
+- Session 提供 N × 7 冲突矩阵 `[sheet, physicalRow, physicalColumn, component, base, local, remote]`；`BuildConflictChoiceMatrix` 只在所有选择有效时返回 N × 5 矩阵 `[sheet, physicalRow, physicalColumn, component, choice]`。`MdlSession` 将其按 sheet 分组为 Phase 4 的 N × 4 输入，不从预览文本重建数据。
+- `FormatConflictComponent(componentName, value)` 对 `TextFont`/`Fill` 调用 `MdlInfra.FormatFormattingPreview`，返回规范化记录的可读摘要；TextFont 预览包括原字符串、字符 run 范围和对应字体属性，Fill 预览包括直接填充字段。它不修改记录，也不把预览摘要作为合并输入。
+- `test/MdlUI/TestMdlUI.bas` 用内存数据覆盖 Ribbon 状态映射、含组件名的冲突选择矩阵、未完成选择拒绝、空值/换行/长字符串显示、字体 run 与填充预览格式化及 A/E/AA 列地址转换，不读取 Excel 对象。
 - Excel UI 集成测试验证从多个配置文件路径中选择单份工作簿、开始编辑、提交、放弃按钮路径；选中不存在/不可达/访问拒绝路径时显示对应错误且不取得锁；只读打开显示“无法取得写入访问”及可能原因。冲突窗体按文字/字体或填充组件提供 Local/Remote 选择，逐项选择后才完成，取消或关闭后共享文件未写且会话/列锁仍在。
 - `.xlam` 包结构检查必须要求 `/customUI/customUI14.xml` 的 Content Type 为 `application/xml`；只检查 Ribbon 关系、部件存在和回调名称不足以证明 Excel 会呈现功能区。
 - 2026-11-19 在 Office 2019 Version 2508 (Build 19127.20860) 对照验证：原包的 Ribbon 未出现；仅将临时副本的 Ribbon Content Type 改为 `application/xml` 后，Excel 显示 `MDDT Collaboration` 选项卡。随后通过 Excel 加载项 Browse 启用正式包 `MDDTLockIssue-ribbon-fix-20261119.xlam`，正式包也显示该选项卡；旧包和临时探测包未启用。

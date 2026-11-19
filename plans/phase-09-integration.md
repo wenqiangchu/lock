@@ -53,6 +53,7 @@ test/tools/test_probe_xlsx_structure.py
 - 验收记录不提交真实路径、账号、服务器名或业务内容；测试后确认 Excel/VBA 进程已结束，清理临时工作簿和本地/共享测试目录。
 - Phase 2/6 的锚点和数据行边界结论必须区分“合成/隔离样例验证”与“代表性模板实测”；没有代表性模板时，M4 不得标记生产就绪。
 - 2026-11-19 本机验证：VBA 聚合测试在 Excel 16.0 build 19127 通过；Excel 合成边界探测和 OpenXML 脱敏结构测试通过；修复后的正式包 `MDDTLockIssue-ribbon-fix-20261119.xlam` 通过 `test/tools/test_addin_package.py` 检查，并在 Office 2019 Version 2508 (Build 19127.20860) 中加载后显示 `MDDT Collaboration` 标签。加载测试中旧包和临时探测包均未启用，临时探测文件已删除。
+- 2026-11-19 最新格式同步回归：`tools/Run-VbaTests.ps1 -TimeoutSeconds 120` 通过（Excel 16.0 build 19127，26 个工程组件）；覆盖单格合并、冲突矩阵损坏记录、越界坐标、重复裁决及失败时不部分应用。由最新源码构建的临时 XLAM 含 15 个 VBA 组件、3 个 Ribbon 按钮和正确回调，构建内验证与 `test/tools/test_addin_package.py` 均通过，验证后删除临时包。该结果验证编译和包结构，不代表加载当前包后的真实窗体交互。
 - 当前未验收：代表性业务模板、至少两个独立 Windows 客户端的 Samba 并发、Ribbon 按钮与窗体完整交互、干净用户环境加载和共享 Save 失败结果。上述项目仍是 Phase 9 验收项；本机验证只证明正式包结构正确且宿主 Excel 显示 Ribbon 标签，不表示端到端流程或生产环境验收完成。
 
 ## 6. 风险与未决问题

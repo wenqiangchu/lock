@@ -29,7 +29,7 @@ Private mSelections() As String
 Private mConfirmed As Boolean
 
 Public Sub Bind(ByVal formObject As Object, ByRef conflicts As Variant, ByVal locationLabel As Object, ByVal countLabel As Object, ByVal baseValue As Object, ByVal localValue As Object, ByVal remoteValue As Object, ByVal previousButton As Object, ByVal nextButton As Object, ByVal localButton As Object, ByVal remoteButton As Object, ByVal finishButton As Object, ByVal cancelButton As Object)
-    If Not ReadConflictBounds(conflicts, mRowLow, mRowHigh) Then Err.Raise vbObjectError + 2801, "CConflictReviewEvents.Bind", "A conflict matrix with six columns is required."
+    If Not ReadConflictBounds(conflicts, mRowLow, mRowHigh) Then Err.Raise vbObjectError + 2801, "CConflictReviewEvents.Bind", "A component conflict matrix with seven columns is required."
     mConflicts = conflicts
     mCurrentRow = mRowLow
     ReDim mSelections(1 To mRowHigh - mRowLow + 1)
@@ -114,15 +114,17 @@ Private Sub RenderCurrent()
     Dim selectionIndex As Long
     Dim rowValue As Long
     Dim columnValue As Long
+    Dim componentName As String
 
     selectionIndex = mCurrentRow - mRowLow + 1
     rowValue = CLng(mConflicts(mCurrentRow, 2))
     columnValue = CLng(mConflicts(mCurrentRow, 3))
-    mLocationLabel.Caption = CStr(mConflicts(mCurrentRow, 1)) & "!" & ExcelColumnLabel(columnValue) & CStr(rowValue)
+    componentName = CStr(mConflicts(mCurrentRow, 4))
+    mLocationLabel.Caption = CStr(mConflicts(mCurrentRow, 1)) & "!" & ExcelColumnLabel(columnValue) & CStr(rowValue) & " - " & componentName
     mCountLabel.Caption = "Conflict " & CStr(selectionIndex) & " / " & CStr(mRowHigh - mRowLow + 1) & "; resolved " & CStr(SelectedCount())
-    mBaseValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 4))
-    mLocalValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 5))
-    mRemoteValue.Text = FormatConflictValue(mConflicts(mCurrentRow, 6))
+    mBaseValue.Text = FormatConflictComponent(componentName, mConflicts(mCurrentRow, 5))
+    mLocalValue.Text = FormatConflictComponent(componentName, mConflicts(mCurrentRow, 6))
+    mRemoteValue.Text = FormatConflictComponent(componentName, mConflicts(mCurrentRow, 7))
     mPreviousButton.Enabled = (mCurrentRow > mRowLow)
     mNextButton.Enabled = (mCurrentRow < mRowHigh)
     mLocalButton.Caption = ChoiceCaption("Keep Local", mSelections(selectionIndex) = "Local")
@@ -174,5 +176,5 @@ Private Function ReadConflictBounds(ByRef conflicts As Variant, ByRef rowLow As 
     End If
     Err.Clear
     On Error GoTo 0
-    ReadConflictBounds = (columnHigh - columnLow + 1 = 6 And rowHigh >= rowLow)
+    ReadConflictBounds = (columnHigh - columnLow + 1 = 7 And rowHigh >= rowLow)
 End Function

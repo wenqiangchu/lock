@@ -17,6 +17,8 @@ Public Type SnapshotData
     AnchorColumnIndexes As Variant
     AnchorValues As Variant
     Values As Variant
+    Fonts As Variant
+    Fills As Variant
 End Type
 
 Public Type SessionSchema
@@ -44,6 +46,8 @@ Public Const ERR_EXCEL_NETWORK_UNAVAILABLE As Long = 1610
 Private Const XL_UP As Long = -4162
 Private Const XL_CELL_TYPE_FORMULAS As Long = -4123
 Private Const XL_MAX_ROWS As Long = 1048576
+Private Const XL_PATTERN_NONE As Long = -4142
+Private Const XL_PATTERN_SOLID As Long = 1
 
 Private mHandles As Collection
 Private mHeartbeatAt As Date
@@ -242,6 +246,8 @@ Public Function ReadDeclaredSnapshot(ByVal handleId As String, ByRef targets As 
     Dim invalidCells As Variant
     Dim rawValues As Variant
     Dim values() As Variant
+    Dim fonts() As Variant
+    Dim fills() As Variant
     Dim anchorValues() As Variant
     Dim firstRow As Long
     Dim lastRow As Long
@@ -251,6 +257,8 @@ Public Function ReadDeclaredSnapshot(ByVal handleId As String, ByRef targets As 
     Dim anchorCount As Long
     Dim hasAnchor As Boolean
     Dim hasDeclaredValue As Boolean
+    Dim textFontData As String
+    Dim fillData As String
 
     ResetSnapshot snapshot
     If Not ResolveSnapshotInputs(handleId, targets, workbook, worksheet, schema, declaredIndexes, errorInfo) Then Exit Function
@@ -268,6 +276,8 @@ Public Function ReadDeclaredSnapshot(ByVal handleId As String, ByRef targets As 
 
     If lastRow < firstRow Then
         snapshot.Values = Empty
+        snapshot.Fonts = Empty
+        snapshot.Fills = Empty
         snapshot.AnchorValues = Empty
         ReadDeclaredSnapshot = True
         errorInfo = MakeAppError(ERR_NONE, "MdlExcel.ReadDeclaredSnapshot", "")
@@ -303,7 +313,21 @@ Public Function ReadDeclaredSnapshot(ByVal handleId As String, ByRef targets As 
         End If
     Next rowIndex
 
+    ReDim fonts(firstRow To lastRow, 1 To schema.ColumnCount)
+    ReDim fills(firstRow To lastRow, 1 To schema.ColumnCount)
+    For rowIndex = firstRow To lastRow
+        For anchorIndex = LBound(declaredIndexes) To UBound(declaredIndexes)
+            columnIndex = CLng(declaredIndexes(anchorIndex))
+            If Not ReadTextFontData(worksheet.Cells(rowIndex, columnIndex), values(rowIndex, columnIndex), textFontData, errorInfo) Then Exit Function
+            If Not ReadFillData(worksheet.Cells(rowIndex, columnIndex), fillData, errorInfo) Then Exit Function
+            fonts(rowIndex, columnIndex) = textFontData
+            fills(rowIndex, columnIndex) = fillData
+        Next anchorIndex
+    Next rowIndex
+
     snapshot.Values = values
+    snapshot.Fonts = fonts
+    snapshot.Fills = fills
     snapshot.AnchorValues = anchorValues
     ReadDeclaredSnapshot = True
     errorInfo = MakeAppError(ERR_NONE, "MdlExcel.ReadDeclaredSnapshot", "")
@@ -353,7 +377,7 @@ StructureChanged:
     errorInfo = MakeAppError(ERR_EXCEL_STRUCTURE, "MdlExcel.ValidateStructure", "The sheet structure or product anchor mapping changed during the session.", expected.SheetName)
 End Function
 
-Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As Variant, ByRef mergedValues As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As Variant, ByRef mergedValues As Variant, ByRef mergedFonts As Variant, ByRef mergedFills As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
     Dim workbook As Workbook
     Dim worksheet As Worksheet
     Dim schema As SheetSchema
@@ -374,6 +398,8 @@ Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As 
     Dim outputValues() As Variant
     Dim rangeToWrite As Range
     Dim readBack As Variant
+    Dim fontData As String
+    Dim fillData As String
     Dim oldEvents As Boolean
     Dim oldScreenUpdating As Boolean
     Dim appStateChanged As Boolean
@@ -381,6 +407,7 @@ Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As 
     On Error GoTo Failed
     If Not ResolveSnapshotInputs(handleId, targets, workbook, worksheet, schema, declaredIndexes, errorInfo) Then Exit Function
     If IsEmpty(mergedValues) Then
+        If Not IsEmpty(mergedFonts) Or Not IsEmpty(mergedFills) Then GoTo InvalidInput
         WriteDeclaredColumns = True
         errorInfo = MakeAppError(ERR_NONE, "MdlExcel.WriteDeclaredColumns", "")
         Exit Function
@@ -388,7 +415,20 @@ Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As 
     If Not GetMatrixBounds(mergedValues, rowLow, rowHigh, columnLow, columnHigh) Then GoTo InvalidInput
     If columnLow > LBound(schema.HeaderNames) Or columnHigh < UBound(schema.HeaderNames) Then GoTo InvalidInput
     If rowLow < 2 Or rowHigh > XL_MAX_ROWS Then GoTo InvalidInput
+    If Not MatrixBoundsMatch(mergedFonts, rowLow, rowHigh, columnLow, columnHigh) Then GoTo InvalidInput
+    If Not MatrixBoundsMatch(mergedFills, rowLow, rowHigh, columnLow, columnHigh) Then GoTo InvalidInput
     If Not ValidateSheetColumns(worksheet, schema, declaredIndexes, CStr(targets(LBound(targets, 1), LBound(targets, 2))), invalidCells, errorInfo) Then Exit Function
+
+    For rowIndex = rowLow To rowHigh
+        For columnIndex = LBound(declaredIndexes) To UBound(declaredIndexes)
+            expectedValue = mergedValues(rowIndex, CLng(declaredIndexes(columnIndex)))
+            fontData = CStr(mergedFonts(rowIndex, CLng(declaredIndexes(columnIndex))))
+            fillData = CStr(mergedFills(rowIndex, CLng(declaredIndexes(columnIndex))))
+            If Not IsSupportedCellValue(expectedValue) Then GoTo InvalidValue
+            If Not TextFontMatchesValue(expectedValue, fontData, errorInfo) Then GoTo InvalidFormat
+            If Not CompareFormattingData(fillData, fillData, equal, comparisonError) Then GoTo InvalidFormat
+        Next columnIndex
+    Next rowIndex
 
     oldEvents = Application.EnableEvents
     oldScreenUpdating = Application.ScreenUpdating
@@ -424,6 +464,17 @@ Public Function WriteDeclaredColumns(ByVal handleId As String, ByRef targets As 
         Next rowIndex
     Next columnIndex
 
+    For rowIndex = rowLow To rowHigh
+        For columnIndex = LBound(declaredIndexes) To UBound(declaredIndexes)
+            outputRow = CLng(declaredIndexes(columnIndex))
+            expectedValue = mergedValues(rowIndex, outputRow)
+            fontData = CStr(mergedFonts(rowIndex, outputRow))
+            fillData = CStr(mergedFills(rowIndex, outputRow))
+            If Not WriteTextFontData(worksheet.Cells(rowIndex, outputRow), expectedValue, fontData, errorInfo) Then GoTo Cleanup
+            If Not WriteFillData(worksheet.Cells(rowIndex, outputRow), fillData, errorInfo) Then GoTo Cleanup
+        Next columnIndex
+    Next rowIndex
+
     WriteDeclaredColumns = True
     errorInfo = MakeAppError(ERR_NONE, "MdlExcel.WriteDeclaredColumns", "")
     GoTo Cleanup
@@ -434,6 +485,10 @@ InvalidInput:
 
 InvalidValue:
     errorInfo = MakeAppError(ERR_EXCEL_INVALID_CONTENTS, "MdlExcel.WriteDeclaredColumns", "Only string or Empty values may be written to AMG cells.", CStr(rowIndex) & "," & CStr(declaredIndexes(columnIndex)))
+    GoTo Cleanup
+
+InvalidFormat:
+    If errorInfo.Code = ERR_NONE Then errorInfo = MakeAppError(ERR_EXCEL_INVALID_CONTENTS, "MdlExcel.WriteDeclaredColumns", "A merged font or fill snapshot is invalid or does not match its cell value.", CStr(rowIndex) & "," & CStr(declaredIndexes(columnIndex)))
     GoTo Cleanup
 
 Failed:
@@ -669,6 +724,321 @@ Private Sub EnsureHandles()
     If mHandles Is Nothing Then Set mHandles = New Collection
 End Sub
 
+Private Function ReadTextFontData(ByVal cell As Range, ByVal cellValue As Variant, ByRef data As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim textValue As String
+    Dim currentFont As String
+    Dim characterFont As String
+    Dim emptyCellFont As String
+    Dim emptyRuns As Variant
+    Dim runBuffer() As Variant
+    Dim runs() As Variant
+    Dim runCount As Long
+    Dim runStart As Long
+    Dim runLength As Long
+    Dim characterIndex As Long
+    Dim index As Long
+    Dim fontObject As Object
+
+    On Error GoTo Failed
+    If VarType(cellValue) = vbString Then textValue = CStr(cellValue)
+    If Len(textValue) = 0 Then
+        Set fontObject = cell.Font
+        If Not CaptureFontSignature(fontObject, emptyCellFont, errorInfo) Then Exit Function
+        emptyRuns = Empty
+        data = BuildTextFontData(cellValue, emptyRuns, emptyCellFont, errorInfo)
+        ReadTextFontData = (Len(data) > 0)
+        Exit Function
+    End If
+
+    ReDim runBuffer(1 To Len(textValue), 1 To 3)
+    ' Character-level reads are required to preserve localized font runs.
+    For characterIndex = 1 To Len(textValue)
+        Set fontObject = cell.Characters(characterIndex, 1).Font
+        If Not CaptureFontSignature(fontObject, characterFont, errorInfo) Then Exit Function
+        If characterIndex = 1 Then
+            emptyCellFont = characterFont
+            currentFont = characterFont
+            runStart = 1
+            runLength = 1
+        ElseIf StrComp(characterFont, currentFont, vbBinaryCompare) = 0 Then
+            runLength = runLength + 1
+        Else
+            runCount = runCount + 1
+            runBuffer(runCount, 1) = runStart
+            runBuffer(runCount, 2) = runLength
+            runBuffer(runCount, 3) = currentFont
+            currentFont = characterFont
+            runStart = characterIndex
+            runLength = 1
+        End If
+    Next characterIndex
+    runCount = runCount + 1
+    runBuffer(runCount, 1) = runStart
+    runBuffer(runCount, 2) = runLength
+    runBuffer(runCount, 3) = currentFont
+    ReDim runs(1 To runCount, 1 To 3)
+    For index = 1 To runCount
+        runs(index, 1) = runBuffer(index, 1)
+        runs(index, 2) = runBuffer(index, 2)
+        runs(index, 3) = runBuffer(index, 3)
+    Next index
+    data = BuildTextFontData(cellValue, runs, emptyCellFont, errorInfo)
+    ReadTextFontData = (Len(data) > 0)
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.ReadTextFontData", "A declared cell font could not be read safely.", CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function CaptureFontSignature(ByVal fontObject As Object, ByRef signature As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim properties As Variant
+    Dim propertyNames As Variant
+
+    propertyNames = Array("Name", "Size", "Bold", "Italic", "Underline", "Strikethrough", "Superscript", "Subscript", "OutlineFont", "Shadow", "ColorIndex", "Color", "ThemeColor", "TintAndShade")
+    If Not CaptureObjectProperties(fontObject, propertyNames, ",13,14,", properties, errorInfo, "MdlExcel.CaptureFontSignature") Then Exit Function
+    If IsNumeric(properties(13)) Then
+        If CDbl(properties(13)) = 0 Then
+            properties(13) = CVErr(2042)
+            properties(14) = CVErr(2042)
+        End If
+    End If
+    signature = BuildFontSignature(properties, errorInfo)
+    CaptureFontSignature = (Len(signature) > 0)
+End Function
+
+Private Function ReadFillData(ByVal cell As Range, ByRef data As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim fillObject As Object
+    Dim properties As Variant
+    Dim propertyNames As Variant
+
+    On Error GoTo Failed
+    Set fillObject = cell.Interior
+    propertyNames = Array("Pattern", "ColorIndex", "Color", "ThemeColor", "TintAndShade", "PatternColorIndex", "PatternColor", "PatternThemeColor", "PatternTintAndShade")
+    If Not CaptureObjectProperties(fillObject, propertyNames, ",4,5,8,9,", properties, errorInfo, "MdlExcel.ReadFillData") Then Exit Function
+    If IsNumeric(properties(4)) Then
+        If CDbl(properties(4)) = 0 Then
+            properties(4) = CVErr(2042)
+            properties(5) = CVErr(2042)
+        End If
+    End If
+    If IsNumeric(properties(8)) Then
+        If CDbl(properties(8)) = 0 Then
+            properties(8) = CVErr(2042)
+            properties(9) = CVErr(2042)
+        End If
+    End If
+    If IsNumeric(properties(1)) Then
+        If CDbl(properties(1)) = XL_PATTERN_SOLID Or CDbl(properties(1)) = XL_PATTERN_NONE Then
+            properties(6) = CVErr(2042)
+            properties(7) = CVErr(2042)
+            properties(8) = CVErr(2042)
+            properties(9) = CVErr(2042)
+        End If
+    End If
+    data = BuildFillData(properties, errorInfo)
+    ReadFillData = (Len(data) > 0)
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.ReadFillData", "A declared cell fill could not be read safely.", CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function CaptureObjectProperties(ByVal source As Object, ByVal propertyNames As Variant, ByVal optionalIndexes As String, ByRef properties As Variant, ByRef errorInfo As AppErrorInfo, ByVal sourceName As String) As Boolean
+    Dim lowerBound As Long
+    Dim upperBound As Long
+    Dim index As Long
+    Dim value As Variant
+    Dim result() As Variant
+
+    On Error GoTo Failed
+    lowerBound = LBound(propertyNames)
+    upperBound = UBound(propertyNames)
+    ReDim result(1 To upperBound - lowerBound + 1)
+    For index = lowerBound To upperBound
+        If TryReadObjectProperty(source, CStr(propertyNames(index)), value) Then
+            result(index - lowerBound + 1) = value
+        ElseIf InStr(1, optionalIndexes, "," & CStr(index - lowerBound + 1) & ",", vbBinaryCompare) > 0 Then
+            result(index - lowerBound + 1) = CVErr(2042)
+        Else
+            errorInfo = MakeAppError(ERR_EXCEL_IO, sourceName, "A required direct formatting property could not be read.", CStr(propertyNames(index)))
+            Exit Function
+        End If
+    Next index
+    properties = result
+    CaptureObjectProperties = True
+    errorInfo = MakeAppError(ERR_NONE, sourceName, "")
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, sourceName, "A direct formatting property could not be read.", CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function TryReadObjectProperty(ByVal source As Object, ByVal propertyName As String, ByRef value As Variant) As Boolean
+    On Error GoTo Failed
+    value = CallByName(source, propertyName, VbGet)
+    If IsNull(value) Or IsError(value) Or IsObject(value) Or IsArray(value) Then Exit Function
+    TryReadObjectProperty = True
+    Exit Function
+
+Failed:
+    Err.Clear
+End Function
+
+Private Function WriteTextFontData(ByVal cell As Range, ByVal cellValue As Variant, ByVal data As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim valueKind As String
+    Dim textValue As String
+    Dim emptyCellFont As String
+    Dim runs As Variant
+    Dim actualData As String
+    Dim runIndex As Long
+    Dim fontObject As Object
+    Dim equal As Boolean
+    Dim compareError As AppErrorInfo
+
+    If Not TextFontMatchesValue(cellValue, data, errorInfo) Then Exit Function
+    If Not ParseTextFontData(data, valueKind, textValue, runs, emptyCellFont, errorInfo) Then Exit Function
+    On Error GoTo Failed
+    If IsEmpty(runs) Then
+        Set fontObject = cell.Font
+        If Not ApplyFontSignature(fontObject, emptyCellFont, errorInfo) Then Exit Function
+    Else
+        For runIndex = LBound(runs, 1) To UBound(runs, 1)
+            Set fontObject = cell.Characters(CLng(runs(runIndex, 1)), CLng(runs(runIndex, 2))).Font
+            If Not ApplyFontSignature(fontObject, CStr(runs(runIndex, 3)), errorInfo) Then Exit Function
+        Next runIndex
+    End If
+    If Not ReadTextFontData(cell, cellValue, actualData, errorInfo) Then Exit Function
+    If Not CompareFormattingData(data, actualData, equal, compareError) Then
+        errorInfo = compareError
+        Exit Function
+    End If
+    If Not equal Then
+        errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.WriteTextFontData", "The written font runs did not match the requested snapshot.")
+        Exit Function
+    End If
+    WriteTextFontData = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlExcel.WriteTextFontData", "")
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.WriteTextFontData", "A declared cell font could not be written safely.", CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function ApplyFontSignature(ByVal fontObject As Object, ByVal signature As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim properties As Variant
+    Dim propertyNames As Variant
+    Dim index As Long
+    Dim themeApplicable As Boolean
+
+    If Not ParseFontSignature(signature, properties, errorInfo) Then Exit Function
+    propertyNames = Array("Name", "Size", "Bold", "Italic", "Underline", "Strikethrough", "Superscript", "Subscript", "OutlineFont", "Shadow")
+    For index = 0 To 9
+        If Not SetNormalizedProperty(fontObject, CStr(propertyNames(index)), CStr(properties(index + 1)), errorInfo) Then Exit Function
+    Next index
+    themeApplicable = (CStr(properties(13)) <> "A")
+    If themeApplicable Then
+        If Not SetNormalizedProperty(fontObject, "ThemeColor", CStr(properties(13)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fontObject, "TintAndShade", CStr(properties(14)), errorInfo) Then Exit Function
+    Else
+        If Not SetNormalizedProperty(fontObject, "ColorIndex", CStr(properties(11)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fontObject, "Color", CStr(properties(12)), errorInfo) Then Exit Function
+    End If
+    ApplyFontSignature = True
+End Function
+
+Private Function WriteFillData(ByVal cell As Range, ByVal data As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim fillObject As Object
+    Dim properties As Variant
+    Dim actualData As String
+    Dim themeApplicable As Boolean
+    Dim patternThemeApplicable As Boolean
+    Dim equal As Boolean
+    Dim compareError As AppErrorInfo
+
+    If Not ParseFillData(data, properties, errorInfo) Then Exit Function
+    On Error GoTo Failed
+    Set fillObject = cell.Interior
+    If Not SetNormalizedProperty(fillObject, "Pattern", CStr(properties(1)), errorInfo) Then Exit Function
+    themeApplicable = (CStr(properties(4)) <> "A")
+    If themeApplicable Then
+        If Not SetNormalizedProperty(fillObject, "ThemeColor", CStr(properties(4)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fillObject, "TintAndShade", CStr(properties(5)), errorInfo) Then Exit Function
+    Else
+        If Not SetNormalizedProperty(fillObject, "ColorIndex", CStr(properties(2)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fillObject, "Color", CStr(properties(3)), errorInfo) Then Exit Function
+    End If
+    patternThemeApplicable = (CStr(properties(8)) <> "A")
+    If patternThemeApplicable Then
+        If Not SetNormalizedProperty(fillObject, "PatternThemeColor", CStr(properties(8)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fillObject, "PatternTintAndShade", CStr(properties(9)), errorInfo) Then Exit Function
+    Else
+        If Not SetNormalizedProperty(fillObject, "PatternColorIndex", CStr(properties(6)), errorInfo) Then Exit Function
+        If Not SetNormalizedProperty(fillObject, "PatternColor", CStr(properties(7)), errorInfo) Then Exit Function
+    End If
+    If Not ReadFillData(cell, actualData, errorInfo) Then Exit Function
+    If Not CompareFormattingData(data, actualData, equal, compareError) Then
+        errorInfo = compareError
+        Exit Function
+    End If
+    If Not equal Then
+        errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.WriteFillData", "The written fill did not match the requested snapshot.", "Expected: " & FormatFormattingPreview(data) & vbCrLf & "Actual: " & FormatFormattingPreview(actualData))
+        Exit Function
+    End If
+    WriteFillData = True
+    errorInfo = MakeAppError(ERR_NONE, "MdlExcel.WriteFillData", "")
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.WriteFillData", "A declared cell fill could not be written safely.", CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function SetNormalizedProperty(ByVal target As Object, ByVal propertyName As String, ByVal encodedValue As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim value As Variant
+    Dim applicable As Boolean
+    Dim decodeError As AppErrorInfo
+
+    If Not DecodeFormatScalar(encodedValue, value, applicable, decodeError) Then
+        errorInfo = decodeError
+        Exit Function
+    End If
+    If Not applicable Then
+        SetNormalizedProperty = True
+        Exit Function
+    End If
+    On Error GoTo Failed
+    CallByName target, propertyName, VbLet, value
+    SetNormalizedProperty = True
+    Exit Function
+
+Failed:
+    errorInfo = MakeAppError(ERR_EXCEL_IO, "MdlExcel.SetNormalizedProperty", "A direct formatting property could not be written.", propertyName & "=" & encodedValue & "; " & CStr(Err.Number) & ": " & Err.Description)
+End Function
+
+Private Function TextFontMatchesValue(ByVal cellValue As Variant, ByVal fontData As String, ByRef errorInfo As AppErrorInfo) As Boolean
+    Dim valueKind As String
+    Dim textValue As String
+    Dim emptyCellFont As String
+    Dim runs As Variant
+
+    If Not ParseTextFontData(fontData, valueKind, textValue, runs, emptyCellFont, errorInfo) Then Exit Function
+    If VarType(cellValue) = vbEmpty Then
+        TextFontMatchesValue = (valueKind = "E")
+    ElseIf VarType(cellValue) = vbString Then
+        TextFontMatchesValue = (valueKind = "S" And StrComp(textValue, CStr(cellValue), vbBinaryCompare) = 0)
+    End If
+    If Not TextFontMatchesValue Then errorInfo = MakeAppError(ERR_EXCEL_INVALID_CONTENTS, "MdlExcel.TextFontMatchesValue", "The font snapshot text does not match the merged cell value.")
+End Function
+
+Private Function MatrixBoundsMatch(ByRef values As Variant, ByVal rowLow As Long, ByVal rowHigh As Long, ByVal columnLow As Long, ByVal columnHigh As Long) As Boolean
+    Dim actualRowLow As Long
+    Dim actualRowHigh As Long
+    Dim actualColumnLow As Long
+    Dim actualColumnHigh As Long
+
+    If Not GetMatrixBounds(values, actualRowLow, actualRowHigh, actualColumnLow, actualColumnHigh) Then Exit Function
+    MatrixBoundsMatch = (actualRowLow = rowLow And actualRowHigh = rowHigh And actualColumnLow = columnLow And actualColumnHigh = columnHigh)
+End Function
+
 Private Function GetMatrixBounds(ByRef values As Variant, ByRef rowLow As Long, ByRef rowHigh As Long, ByRef columnLow As Long, ByRef columnHigh As Long) As Boolean
     Dim probe As Long
 
@@ -818,4 +1188,6 @@ Private Sub ResetSnapshot(ByRef snapshot As SnapshotData)
     snapshot.AnchorColumnIndexes = Empty
     snapshot.AnchorValues = Empty
     snapshot.Values = Empty
+    snapshot.Fonts = Empty
+    snapshot.Fills = Empty
 End Sub

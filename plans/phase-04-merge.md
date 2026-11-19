@@ -14,7 +14,7 @@
 - 字符串值与字符字体映射必须绑定为一个 `TextFont` 组件整体比较和裁决，不逐字符拼接双方结果。这样避免文字长度/位置改变后把一方格式套到另一方不同字符上；代价是双方改了不同字符的字体也会产生组件级冲突。填充独立合并，减少与字体变化无关的冲突。
 - 合并模块冲突记录包含物理行/列、组件名及 Base/Local/Remote 纯数据；工作表名由 MdlSession 聚合时补入。模块不生成 UI 字符串，也不持有 Excel 对象。
 - 冲突裁决输入为每项冲突的 Local/Remote 选择。任何组件冲突未选择或选择非法时，返回“未完成”，结果不可提交；全部选择完成后生成最终组件数据。
-- 选择输入为 N × 4 Variant 矩阵，列依次为物理行、物理列、组件名和 Local/Remote。应用前先校验数量、坐标、重复项、组件名和选项；任何缺选或非法选择均不应用部分裁决。
+- 选择输入为 N × 4 Variant 矩阵，列依次为物理行、物理列、组件名和 Local/Remote。应用前先验证冲突矩阵形状、合并矩阵的物理边界、冲突坐标和组件快照，再校验选择是否恰好覆盖每项冲突一次。应用时先在合并结果的副本上写入选择；仅全部格式记录成功解析后才一次性替换原结果并标记完成，意外损坏的后续冲突记录不会留下部分已应用选择。
 - 合并与裁决全程只在内存中进行。只有 `MdlSession` 确认全部裁决完成后，才可推进到写回阶段。
 
 ## 3. 涉及函数与模块
@@ -27,7 +27,10 @@
 Public Function MergeThreeWay(ByRef baseValues As Variant, ByRef localValues As Variant, ByRef remoteValues As Variant, ByRef baseFonts As Variant, ByRef localFonts As Variant, ByRef remoteFonts As Variant, ByRef baseFills As Variant, ByRef localFills As Variant, ByRef remoteFills As Variant, ByRef declaredColumns As Variant, ByRef result As MergeResult, ByRef errorInfo As AppErrorInfo) As Boolean
 Public Function ApplyConflictChoices(ByRef result As MergeResult, ByRef choices As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
 Public Function IsMergeResolved(ByRef result As MergeResult) As Boolean
-Private Function ClassifyComponent(ByVal componentName As String, ByRef baseComponent As Variant, ByRef localComponent As Variant, ByRef remoteComponent As Variant, ByRef errorInfo As AppErrorInfo) As MergeCellOutcome
+Private Function ClassifyComponent(ByVal baseComponent As Variant, ByVal localComponent As Variant, ByVal remoteComponent As Variant, ByRef errorInfo As AppErrorInfo) As MergeCellOutcome
+Private Function ValidateConflictRecords(ByRef conflicts As Variant, ByVal conflictLow As Long, ByVal conflictHigh As Long, ByVal conflictColumnLow As Long, ByVal rowLow As Long, ByVal rowHigh As Long, ByVal columnLow As Long, ByVal columnHigh As Long, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function ValidateConflictComponent(ByVal componentName As String, ByVal baseComponent As Variant, ByVal localComponent As Variant, ByVal remoteComponent As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Private Function TryReadLong(ByVal value As Variant, ByRef number As Long) As Boolean
 Private Sub ResetMergeResult(ByRef result As MergeResult)
 ```
 
@@ -43,7 +46,9 @@ Private Sub ResetMergeResult(ByRef result As MergeResult)
 
 - `test/MdlMerge/` 使用内存数组，验证文字变化、字符颜色/粗体变化、填充变化、Local 改字体与 Remote 改填充自动组合、同组件相同修改、同组件不同修改冲突、文字长度变化时不跨快照拼接字符格式、不同列并发修改、空数组、单元素、最大数组和非法格式数据。
 - 对每个文字/字体或填充冲突分别选择 Local/Remote，检查最终组件数据；未选择、重复选择、非法组件、非法选项或错误索引均不能标记为完成。
-- 验证输入维度不一致、锚点映射不一致或声明列越界时整体失败，不返回可写回的部分结果。
+- 破坏公开 `MergeResult` 中后续冲突的格式记录或坐标，验证裁决整体失败，值/字体/填充均不发生部分应用，待裁决状态保持不变。
+- 当前内存测试另覆盖单格矩阵；最大输入规模和性能门槛尚未定义，需在 Phase 9 以代表性数据补测。
+- 验证输入维度不一致或声明列越界时整体失败，不返回可写回的部分结果。锚点映射由 `MdlExcel.ValidateStructure` 在进入本模块前校验；`MdlMerge` 不接收锚点矩阵。
 - 本阶段不启动 Excel；冲突窗体取消后共享文件未写入的集成验证放 Phase 8/9。
 - VBA 测试由 tools/Run-VbaTests.ps1 在受控隐藏 Excel 进程中作为执行宿主运行；合并实现只处理内存矩阵，不访问 Excel 对象模型。
 
@@ -52,3 +57,4 @@ Private Sub ResetMergeResult(ByRef result As MergeResult)
 - 字符串与空白比较沿用 Phase 1 的 `MdlInfra.CompareCellValues`，确保 Diff/Merge 判定一致；非空非字符串和公式必须在 Excel 适配阶段拒绝。
 - **冲突 UI 的取消语义已确定：不写共享文件，保留本地会话和列锁。** 本模块只返回未完成裁决状态，不负责释放锁；需由 Phase 7 保证这个状态转移。
 - 逐字符格式映射的字符索引依赖字符串内容和长度；本阶段以 `TextFont` 整体为合并单元，不进行跨版本字符对齐或格式拼接。若未来需要细粒度字符级合并，须先另行设计并测试插入、删除和 Unicode 字符映射。
+- 当前没有定义 `MdlMerge` 的最大可接受矩阵规模；三方输入和合并结果均保存在内存中。需用代表性数据测量运行时间与峰值内存后再确定规模门槛，不能把单格/小型矩阵通过视为大规模性能验收。

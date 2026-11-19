@@ -14,7 +14,8 @@
 - 提供只读 UNC 路径诊断，将可判定的文件/目录不存在、访问拒绝和网络路径不可达区分为稳定状态，并保留底层系统错误码；诊断不创建共享文件。无法可靠区分的状态保留为“无法确认”，不得误报为文件不存在。
 - 延迟探测只对已有共享文件或目录做只读访问计时，不在共享上创建探测文件。探测失败要返回错误状态，不把失败解释成“共享文件不存在”。
 - 业务值比较规则集中在 `MdlInfra`，避免 `MdlDiff` 与 `MdlMerge` 各自实现后出现语义分叉：非空值必须为字符串，字符串逐字符精确比较；`Empty` 作为空白哨兵，仅与 `Empty` 相等，零长度字符串 `""` 与 `Empty` 不同。其它业务值 Variant 类型返回输入错误。
-- 纯数据字体格式快照按字符位置保存直接字体属性；纯数据填充快照保存单元格级直接填充属性。基础设施格式比较器递归比较规范化数组的秩、边界和字段值；字段只使用字符串、数值、布尔值，不接触 Excel 对象，也不接受 Null、Error、Object 或结构不一致的数据。字符文本与其字体映射由上层作为一个合并组件比较，填充作为另一组件比较。
+- 字体与填充快照在 Excel 边界被编码为版本化、长度前缀的纯字符串；`FP1` 的 14 个字段依次为 `Name`、`Size`、`Bold`、`Italic`、`Underline`、`Strikethrough`、`Superscript`、`Subscript`、`OutlineFont`、`Shadow`、`ColorIndex`、`Color`、`ThemeColor`、`TintAndShade`；`FL1` 的 9 个字段依次为 `Pattern`、`ColorIndex`、`Color`、`ThemeColor`、`TintAndShade`、`PatternColorIndex`、`PatternColor`、`PatternThemeColor`、`PatternTintAndShade`。`TF1` 绑定 `Empty`/字符串标记、原文和压缩字体 runs；每个 run 为 `[一基起点, 长度, FP1 签名]`，连续相同签名合并且 runs 必须覆盖完整字符串。空白/零长度文本无字符 run，保存单元格级字体签名。编码字段保留类型、长度和原值，不允许依赖分隔符转义或区域格式解析。
+- `CompareFormattingData` 只接受可完整解析、组件类型相同的规范化字符串，并逐字节精确比较；它不递归比较任意数组。公开解析/构造过程用于在 Excel 边界生成、校验及展示纯数据，不接收 Excel 对象。格式值只允许字符串、数值、布尔值、Empty 和内部约定的“不适用”错误哨兵；Null、对象、数组或未知类型拒绝。字符文本与其字体映射由上层作为一个 `TextFont` 组件比较，填充作为另一组件比较。
 - 日志写入用户本机 `%LOCALAPPDATA%` 下的应用目录，避免业务数据和运行文件写入共享；具体日志保留策略在风险项中待确认。
 - `MdlInfra` 不依赖其它产品模块，不引用 Excel 对象模型。
 
@@ -41,7 +42,17 @@ Public Function InspectUncPath(ByVal path As String, ByRef status As SharedPathS
 Public Function ClassifySharedPathError(ByVal systemError As Long) As SharedPathStatus
 Public Function ProbeUncLatency(ByVal path As String, ByRef elapsedMs As Double, ByRef errorInfo As AppErrorInfo) As Boolean
 Public Function CompareCellValues(ByVal leftValue As Variant, ByVal rightValue As Variant, ByRef equal As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
-Public Function CompareFormattingData(ByRef leftFormatting As Variant, ByRef rightFormatting As Variant, ByRef equal As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function EncodeFormatField(ByVal value As String) As String
+Public Function DecodeFormatField(ByRef data As String, ByRef cursor As Long, ByRef value As String) As Boolean
+Public Function BuildFontSignature(ByRef properties As Variant, ByRef errorInfo As AppErrorInfo) As String
+Public Function BuildTextFontData(ByVal cellValue As Variant, ByRef runs As Variant, ByVal emptyCellFont As String, ByRef errorInfo As AppErrorInfo) As String
+Public Function BuildFillData(ByRef properties As Variant, ByRef errorInfo As AppErrorInfo) As String
+Public Function ParseTextFontData(ByVal data As String, ByRef valueKind As String, ByRef textValue As String, ByRef runs As Variant, ByRef emptyCellFont As String, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ParseFontSignature(ByVal data As String, ByRef properties As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function ParseFillData(ByVal data As String, ByRef properties As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function DecodeFormatScalar(ByVal encodedValue As String, ByRef value As Variant, ByRef isApplicable As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function CompareFormattingData(ByVal leftValue As Variant, ByVal rightValue As Variant, ByRef equal As Boolean, ByRef errorInfo As AppErrorInfo) As Boolean
+Public Function FormatFormattingPreview(ByVal data As Variant) As String
 Private Function NormalizeConfigPaths(ByRef sourcePaths As Variant, ByRef normalizedPaths As Variant, ByRef errorInfo As AppErrorInfo) As Boolean
 Private Function EnsureLocalDirectory(ByVal path As String, ByRef errorInfo As AppErrorInfo) As Boolean
 Private Function EnsureDirectoryTree(ByVal path As String) As Boolean
@@ -62,7 +73,7 @@ WorkbookPath=\\server\share\folder-b\workbook-b.xlsx
 
 ## 4. 功能范围
 
-做：本地日志、错误封装、多 UNC 路径校验与只读诊断、版本 1/2 配置读写、只读延迟探测、统一字符串/空值和规范化字体/填充数据比较、纯逻辑单元测试。
+做：本地日志、错误封装、多 UNC 路径校验与只读诊断、版本 1/2 配置读写、只读延迟探测、统一字符串/空值比较、规范化字体/填充快照构造/解析/比较/摘要预览、纯逻辑单元测试。
 
 本阶段不做 Ribbon/设置窗体、会话状态、共享锁、工作簿读写、共享审计日志、自动寻找或改写业务文件。不得接受映射盘符作为配置，不得为探测在共享上创建临时文件。
 
@@ -70,7 +81,7 @@ WorkbookPath=\\server\share\folder-b\workbook-b.xlsx
 
 - 覆盖 LOCALAPPDATA 路径守卫对父目录穿越的拒绝，并检查 Windows GUID 格式与连续生成不重复。配置拒绝路径测试不得创建目标文件。
 
-- `test/MdlInfra/`：UNC 有效/无效形式、盘符拒绝写入配置、多个路径读写、版本 1 兼容、重复路径、配置缺失/损坏、路径诊断状态映射、日志目录不可写、字符串精确比较、大小写/空格差异、`Empty` 与 `""`、字体 run/填充规范化数组相同与不同、嵌套维度或字段顺序不匹配、Null/Error/Object 拒绝。VBA 测试由 `test/TestSupport.bas` 捕获断言错误并返回给 `tools/Run-VbaTests.ps1`，避免隐藏 Excel 因未处理错误停在模态对话框；测试逻辑不访问工作簿对象。
+- `test/MdlInfra/`：UNC 有效/无效形式、盘符拒绝写入配置、多个路径读写、版本 1 兼容、重复路径、配置缺失/损坏、路径诊断状态映射、日志目录不可写、字符串精确比较、大小写/空格差异、`Empty` 与 `""`、长度前缀含分隔符、空文本字体状态、run 连续覆盖、固定字段顺序、填充/字体类型不匹配、损坏记录及格式摘要预览。VBA 测试由 `test/TestSupport.bas` 捕获断言错误并返回给 `tools/Run-VbaTests.ps1`，避免隐藏 Excel 因未处理错误停在模态对话框；测试逻辑不访问工作簿对象。
 - 路径和配置测试使用内存或本机临时目录；延迟探测的共享路径测试单独标记环境前提，且只测已有目标。
 - 覆盖空字符串、尾部分隔符、大小写、权限不足和 I/O 失败；验证日志失败不会覆盖原始业务错误。
 - 测试输入只使用内存数据或 `%LOCALAPPDATA%` 下的本机临时配置；不打开 Excel 工作簿、不访问 Excel 对象模型，也不访问真实共享。当前 VBA runner 使用受控隐藏 Excel 作为 VBA 执行宿主，并设置硬超时及进程清理。
@@ -81,5 +92,5 @@ WorkbookPath=\\server\share\folder-b\workbook-b.xlsx
 - **配置由用户手工维护。** 当前加载项没有配置管理窗体；用户需在 `%LOCALAPPDATA%\MDDTLock\config.ini` 编辑版本 2 清单。错误或缺失时显示文件位置和格式要求，不自动猜测、创建或修复共享路径。
 - **Windows 对共享路径错误的分类可能因服务器、权限和 SMB 状态而不同。** 暂定只对明确的系统错误分类；其余保留原始系统错误并显示“无法确认”，需在目标 Samba 环境验收。
 - **字符串比较暂定区分大小写且保留空格，`Empty` 与 `""` 区分。** 这是精确比较的保守解释；若业务把大小写或空白归一视为相等，需回来确认后调整共享比较函数及 Diff/Merge 测试。
-- 字体/填充比较依赖 `MdlExcel` 将 Excel 格式读取为确定形状的纯 Variant 数据；主题颜色、自动颜色和混合格式的规范化/往返必须在 Phase 6/9 用目标 Excel 验证，无法无损表示时应失败关闭，不得静默丢弃格式。
+- 纯字符串协议已由内存测试验证；其 Excel 属性读取、主题/自动颜色、填充图案及写入后等价状态仍依赖目标 Excel 的真实对象模型。Phase 6/9 必须覆盖这些映射，无法无损表示时应失败关闭，不得静默丢弃有效格式。
 - 延迟探测只能说明某次文件系统访问耗时，不能保证随后的提交速度；界面不得把它当作可用性承诺。

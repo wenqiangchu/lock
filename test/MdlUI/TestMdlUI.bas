@@ -6,6 +6,7 @@ Public Sub RunMdlUITests()
     TestConflictChoiceMatrix
     TestConflictChoiceMatrixRejectsIncompleteSelections
     TestConflictValueFormatting
+    TestConflictFormattingPreview
 End Sub
 
 Private Sub TestRibbonEnabledMapping()
@@ -26,22 +27,24 @@ Private Sub TestRibbonEnabledMapping()
 End Sub
 
 Private Sub TestConflictChoiceMatrix()
-    Dim conflicts(0 To 1, 1 To 6) As Variant
+    Dim conflicts(0 To 1, 1 To 7) As Variant
     Dim selections(4 To 5) As Variant
     Dim choices As Variant
 
     conflicts(0, 1) = "SheetA"
     conflicts(0, 2) = 4
     conflicts(0, 3) = 3
-    conflicts(0, 4) = "base-a"
-    conflicts(0, 5) = "local-a"
-    conflicts(0, 6) = "remote-a"
+    conflicts(0, 4) = "TextFont"
+    conflicts(0, 5) = TestTextFontData("base-a", TestFontSignature(False, 0))
+    conflicts(0, 6) = TestTextFontData("local-a", TestFontSignature(True, 0))
+    conflicts(0, 7) = TestTextFontData("remote-a", TestFontSignature(False, 255))
     conflicts(1, 1) = "SheetB"
     conflicts(1, 2) = 9
     conflicts(1, 3) = 5
-    conflicts(1, 4) = Empty
-    conflicts(1, 5) = "local-b"
-    conflicts(1, 6) = "remote-b"
+    conflicts(1, 4) = "Fill"
+    conflicts(1, 5) = TestFillData(0)
+    conflicts(1, 6) = TestFillData(255)
+    conflicts(1, 7) = TestFillData(65280)
     selections(4) = "Local"
     selections(5) = "Remote"
 
@@ -51,21 +54,24 @@ Private Sub TestConflictChoiceMatrix()
     AssertEqual CStr(choices(1, 1)), "SheetA", "The sheet name should be preserved."
     AssertEqual CStr(choices(1, 2)), "4", "The physical row should be preserved."
     AssertEqual CStr(choices(1, 3)), "3", "The physical column should be preserved."
-    AssertEqual CStr(choices(1, 4)), "Local", "The first choice should be preserved."
-    AssertEqual CStr(choices(2, 4)), "Remote", "The second choice should be preserved."
+    AssertEqual CStr(choices(1, 4)), "TextFont", "The first component should be preserved."
+    AssertEqual CStr(choices(1, 5)), "Local", "The first choice should be preserved."
+    AssertEqual CStr(choices(2, 4)), "Fill", "The second component should be preserved."
+    AssertEqual CStr(choices(2, 5)), "Remote", "The second choice should be preserved."
 End Sub
 
 Private Sub TestConflictChoiceMatrixRejectsIncompleteSelections()
-    Dim conflicts(1 To 1, 1 To 6) As Variant
+    Dim conflicts(1 To 1, 1 To 7) As Variant
     Dim selections(1 To 1) As Variant
     Dim choices As Variant
 
     conflicts(1, 1) = "SheetA"
     conflicts(1, 2) = 4
     conflicts(1, 3) = 3
-    conflicts(1, 4) = "base"
-    conflicts(1, 5) = "local"
-    conflicts(1, 6) = "remote"
+    conflicts(1, 4) = "TextFont"
+    conflicts(1, 5) = TestTextFontData("base", TestFontSignature(False, 0))
+    conflicts(1, 6) = TestTextFontData("local", TestFontSignature(True, 0))
+    conflicts(1, 7) = TestTextFontData("remote", TestFontSignature(False, 255))
     selections(1) = vbNullString
     AssertFalse BuildConflictChoiceMatrix(conflicts, selections, choices), "An unanswered conflict must not create commit choices."
     AssertTrue IsEmpty(choices), "Invalid selections must not return a partial matrix."
@@ -85,6 +91,15 @@ Private Sub TestConflictValueFormatting()
     AssertEqual ExcelColumnLabel(5), "E", "Anchor columns should retain their letter addresses."
     AssertEqual ExcelColumnLabel(27), "AA", "Column labels should handle multi-letter addresses."
     AssertEqual ExcelColumnLabel(0), vbNullString, "Invalid column indexes should not produce a misleading address."
+End Sub
+
+Private Sub TestConflictFormattingPreview()
+    Dim textFont As String
+    Dim fill As String
+    textFont = TestTextFontData("sample", TestFontSignature(True, 255))
+    fill = TestFillData(65280)
+    AssertTrue InStr(1, FormatConflictComponent("TextFont", textFont), "Bold=True", vbTextCompare) > 0, "TextFont conflict previews should expose run formatting."
+    AssertTrue InStr(1, FormatConflictComponent("Fill", fill), "Fill:", vbBinaryCompare) > 0, "Fill conflict previews should describe fill properties."
 End Sub
 
 Private Sub AssertTrue(ByVal condition As Boolean, ByVal message As String)

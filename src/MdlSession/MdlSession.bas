@@ -308,7 +308,7 @@ Private Function ExecuteCommit(ByRef choices As Variant, ByVal isConflictReview 
 
     If Not ValidateCommitAuthority(gateFields, errorInfo) Then GoTo Cleanup
     For index = 1 To mGroupCount
-        If Not WriteDeclaredColumns(remoteHandle, mSheetTargets(index), mergeResults(index).MergedValues, errorInfo) Then GoTo Cleanup
+        If Not WriteDeclaredColumns(remoteHandle, mSheetTargets(index), mergeResults(index).MergedValues, mergeResults(index).MergedFonts, mergeResults(index).MergedFills, errorInfo) Then GoTo Cleanup
     Next index
     If Not ValidateCommitAuthority(gateFields, errorInfo) Then GoTo Cleanup
 
@@ -480,15 +480,15 @@ Private Function BuildCurrentMerges(ByVal remoteHandle As String, ByRef merges()
         If Not valid Then Exit Function
         If Not ReadDeclaredSnapshot(mLocalHandle, mSheetTargets(index), localSnapshot, errorInfo) Then Exit Function
         If Not ReadDeclaredSnapshot(remoteHandle, mSheetTargets(index), remoteSnapshot, errorInfo) Then Exit Function
-        If Not CompareSnapshots(baseSnapshot.Values, localSnapshot.Values, baseSnapshot.DeclaredColumnIndexes, localChanges, errorInfo) Then Exit Function
+        If Not CompareSnapshots(baseSnapshot.Values, localSnapshot.Values, baseSnapshot.Fonts, localSnapshot.Fonts, baseSnapshot.Fills, localSnapshot.Fills, baseSnapshot.DeclaredColumnIndexes, localChanges, errorInfo) Then Exit Function
         If Not IsEmpty(localChanges) Then hasLocalChanges = True
-        If Not MergeThreeWay(baseSnapshot.Values, localSnapshot.Values, remoteSnapshot.Values, baseSnapshot.DeclaredColumnIndexes, merges(index), errorInfo) Then Exit Function
+        If Not MergeThreeWay(baseSnapshot.Values, localSnapshot.Values, remoteSnapshot.Values, baseSnapshot.Fonts, localSnapshot.Fonts, remoteSnapshot.Fonts, baseSnapshot.Fills, localSnapshot.Fills, remoteSnapshot.Fills, baseSnapshot.DeclaredColumnIndexes, merges(index), errorInfo) Then Exit Function
         conflictCount = conflictCount + merges(index).ConflictCount
     Next index
 
     conflicts = Empty
     If conflictCount > 0 Then
-        ReDim conflictValues(1 To conflictCount, 1 To 6)
+        ReDim conflictValues(1 To conflictCount, 1 To 7)
         outputIndex = 0
         For index = 1 To mGroupCount
             If merges(index).ConflictCount > 0 Then
@@ -502,6 +502,7 @@ Private Function BuildCurrentMerges(ByVal remoteHandle As String, ByRef merges()
                     conflictValues(outputIndex, 4) = merges(index).Conflicts(sourceIndex, 3)
                     conflictValues(outputIndex, 5) = merges(index).Conflicts(sourceIndex, 4)
                     conflictValues(outputIndex, 6) = merges(index).Conflicts(sourceIndex, 5)
+                    conflictValues(outputIndex, 7) = merges(index).Conflicts(sourceIndex, 6)
                 Next sourceIndex
             End If
         Next index
@@ -576,14 +577,15 @@ Private Function ConflictViewsEqual(ByRef leftConflicts As Variant, ByRef rightC
     If Not GetMatrixBounds(leftConflicts, leftRowLow, leftRowHigh, leftColumnLow, leftColumnHigh) Then Exit Function
     If Not GetMatrixBounds(rightConflicts, rightRowLow, rightRowHigh, rightColumnLow, rightColumnHigh) Then Exit Function
     If leftRowHigh - leftRowLow <> rightRowHigh - rightRowLow Then Exit Function
-    If leftColumnHigh - leftColumnLow <> 5 Or rightColumnHigh - rightColumnLow <> 5 Then Exit Function
+    If leftColumnHigh - leftColumnLow <> 6 Or rightColumnHigh - rightColumnLow <> 6 Then Exit Function
     For leftIndex = leftRowLow To leftRowHigh
         rightIndex = rightRowLow + leftIndex - leftRowLow
         If StrComp(CStr(leftConflicts(leftIndex, leftColumnLow)), CStr(rightConflicts(rightIndex, rightColumnLow)), vbBinaryCompare) <> 0 Then Exit Function
         If CLng(leftConflicts(leftIndex, leftColumnLow + 1)) <> CLng(rightConflicts(rightIndex, rightColumnLow + 1)) Then Exit Function
         If CLng(leftConflicts(leftIndex, leftColumnLow + 2)) <> CLng(rightConflicts(rightIndex, rightColumnLow + 2)) Then Exit Function
-        For valueIndex = 3 To 5
-            If Not CompareCellValues(leftConflicts(leftIndex, leftColumnLow + valueIndex), rightConflicts(rightIndex, rightColumnLow + valueIndex), equal, comparisonError) Then Exit Function
+        If StrComp(CStr(leftConflicts(leftIndex, leftColumnLow + 3)), CStr(rightConflicts(rightIndex, rightColumnLow + 3)), vbBinaryCompare) <> 0 Then Exit Function
+        For valueIndex = 4 To 6
+            If Not CompareFormattingData(leftConflicts(leftIndex, leftColumnLow + valueIndex), rightConflicts(rightIndex, rightColumnLow + valueIndex), equal, comparisonError) Then Exit Function
             If Not equal Then Exit Function
         Next valueIndex
     Next leftIndex
@@ -604,12 +606,12 @@ Private Function ApplySessionConflictChoices(ByRef merges() As MergeResult, ByRe
     Dim errorCheck As AppErrorInfo
 
     If Not GetMatrixBounds(choices, rowLow, rowHigh, columnLow, columnHigh) Then GoTo InvalidChoices
-    If columnHigh - columnLow + 1 <> 4 Then GoTo InvalidChoices
+    If columnHigh - columnLow + 1 <> 5 Then GoTo InvalidChoices
     For choiceIndex = rowLow To rowHigh
         If VarType(choices(choiceIndex, columnLow)) <> vbString Then GoTo InvalidChoices
         If VarType(choices(choiceIndex, columnLow + 1)) = vbString Or Not IsNumeric(choices(choiceIndex, columnLow + 1)) Then GoTo InvalidChoices
         If VarType(choices(choiceIndex, columnLow + 2)) = vbString Or Not IsNumeric(choices(choiceIndex, columnLow + 2)) Then GoTo InvalidChoices
-        If VarType(choices(choiceIndex, columnLow + 3)) <> vbString Then GoTo InvalidChoices
+        If VarType(choices(choiceIndex, columnLow + 3)) <> vbString Or VarType(choices(choiceIndex, columnLow + 4)) <> vbString Then GoTo InvalidChoices
     Next choiceIndex
 
     For groupIndex = 1 To mGroupCount
@@ -618,7 +620,7 @@ Private Function ApplySessionConflictChoices(ByRef merges() As MergeResult, ByRe
             If StrComp(CStr(choices(choiceIndex, columnLow)), CStr(mSheetNames(groupIndex)), vbTextCompare) = 0 Then matchCount = matchCount + 1
         Next choiceIndex
         If matchCount > 0 Then
-            ReDim groupChoices(1 To matchCount, 1 To 3)
+            ReDim groupChoices(1 To matchCount, 1 To 4)
             outputRow = 0
             For choiceIndex = rowLow To rowHigh
                 If StrComp(CStr(choices(choiceIndex, columnLow)), CStr(mSheetNames(groupIndex)), vbTextCompare) = 0 Then
@@ -626,6 +628,7 @@ Private Function ApplySessionConflictChoices(ByRef merges() As MergeResult, ByRe
                     groupChoices(outputRow, 1) = choices(choiceIndex, columnLow + 1)
                     groupChoices(outputRow, 2) = choices(choiceIndex, columnLow + 2)
                     groupChoices(outputRow, 3) = choices(choiceIndex, columnLow + 3)
+                    groupChoices(outputRow, 4) = choices(choiceIndex, columnLow + 4)
                 End If
             Next choiceIndex
             If Not ApplyConflictChoices(merges(groupIndex), groupChoices, errorInfo) Then Exit Function

@@ -6,6 +6,7 @@ Public Sub RunMdlInfraTests()
     TestUncValidation
     TestPathErrorClassification
     TestCellValueComparison
+    TestFormattingSnapshotProtocol
     TestConfigRoundTrip
     TestLegacyConfigRead
     TestConfigRejectsMappedAndDuplicatePaths
@@ -16,6 +17,52 @@ Public Sub RunMdlInfraTests()
 
 Failed:
     TestSupport.RecordTestFailure "TestMdlInfra: " & Err.Description & " (" & CStr(Err.Number) & ")"
+End Sub
+
+Private Sub TestFormattingSnapshotProtocol()
+    Dim normalFont As String
+    Dim boldFont As String
+    Dim baseTextFont As String
+    Dim changedTextFont As String
+    Dim blankFont As String
+    Dim emptyTextFont As String
+    Dim fillData As String
+    Dim valueKind As String
+    Dim textValue As String
+    Dim emptyCellFont As String
+    Dim runs As Variant
+    Dim equal As Boolean
+    Dim errorInfo As AppErrorInfo
+    Dim cursor As Long
+    Dim fieldValue As String
+
+    normalFont = TestFontSignature(False, 0)
+    boldFont = TestFontSignature(True, 255)
+    baseTextFont = TestTextFontData("abcd", normalFont)
+    changedTextFont = TestTextFontData("abcd", boldFont)
+    blankFont = TestTextFontData(Empty, normalFont)
+    emptyTextFont = TestTextFontData(vbNullString, normalFont)
+    fillData = TestFillData(65280)
+
+    AssertTrue Len(normalFont) > 4, "Font signatures should use the normalized property protocol."
+    AssertTrue CompareFormattingData(baseTextFont, baseTextFont, equal, errorInfo), "Canonical text/font data should compare."
+    AssertTrue equal, "Identical text/font snapshots should match."
+    AssertTrue CompareFormattingData(baseTextFont, changedTextFont, equal, errorInfo), "Different font snapshots should compare."
+    AssertFalse equal, "A bold/color change must be visible to diff."
+    AssertTrue CompareFormattingData(blankFont, emptyTextFont, equal, errorInfo), "Blank and zero-length text font data should compare."
+    AssertFalse equal, "Empty and zero-length text must remain distinct."
+    AssertFalse CompareFormattingData("TF1|bad", "TF1|bad", equal, errorInfo), "Malformed format records must fail closed."
+
+    AssertTrue ParseTextFontData(baseTextFont, valueKind, textValue, runs, emptyCellFont, errorInfo), "A canonical text/font value should parse."
+    AssertEqual valueKind, "S", "String values should retain their marker."
+    AssertEqual textValue, "abcd", "The text should round-trip."
+    AssertEqual CStr(UBound(runs, 1)), "1", "Adjacent equal characters should compress into one font run."
+    AssertTrue InStr(1, FormatFormattingPreview(baseTextFont), "Characters 1-4", vbBinaryCompare) > 0, "Font preview should identify the affected character span."
+    AssertTrue InStr(1, FormatFormattingPreview(fillData), "Fill:", vbBinaryCompare) > 0, "Fill preview should identify the component."
+
+    cursor = 1
+    AssertTrue DecodeFormatField("3:a:b", cursor, fieldValue), "Length-prefixed fields should support delimiter characters."
+    AssertEqual fieldValue, "a:b", "Field decoding should preserve embedded delimiters."
 End Sub
 
 Private Sub TestUncValidation()

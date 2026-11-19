@@ -28,50 +28,84 @@ Private Sub TestPhysicalSnapshotsAndDeclaredWrite()
     Dim expected As SessionSchema
     Dim targets As Variant
     Dim mergedValues As Variant
+    Dim mergedFonts As Variant
+    Dim mergedFills As Variant
+    Dim parsedKind As String
+    Dim parsedText As String
+    Dim emptyCellFont As String
+    Dim runs As Variant
+    Dim errorInfo As AppErrorInfo
+    Dim errorInfo2 As AppErrorInfo
     Dim invalidCells As Variant
     Dim sheetNames As Variant
-    Dim errorInfo As AppErrorInfo
     Dim valid As Boolean
     Dim anchorBefore As Variant
     Dim unselectedBefore As Variant
+    Dim currentStep As String
+    Dim failureNumber As Long
+    Dim failureDescription As String
 
     On Error GoTo Failed
+    currentStep = "register test workbook"
     AssertTrue RegisterCurrentTestWorkbook(handleId, errorInfo), "The current test workbook should be registered. " & errorInfo.Message
     Set sheet = ThisWorkbook.Worksheets.Item(1)
     sheet.Name = "MdlExcelFixture"
+    currentStep = "prepare workbook fixture"
     AssertTrue ListWorksheetNames(handleId, sheetNames, errorInfo), "Worksheet names should be exposed as strings."
     AssertEqual CStr(sheetNames(1)), "MdlExcelFixture", "The workbook adapter should return the physical worksheet name."
     FillHeaders sheet
     FillFixtureRows sheet
+    sheet.Cells(4, 4).Characters(1, 2).Font.Color = RGB(255, 0, 0)
+    sheet.Cells(4, 4).Characters(4, 2).Font.Bold = True
+    sheet.Cells(4, 4).Interior.Color = RGB(220, 230, 241)
     targets = OneSheetTarget("MdlExcelFixture", "AMG_Value")
 
+    currentStep = "read sheet schema"
     AssertTrue ReadSheetSchema(handleId, "MdlExcelFixture", schema, errorInfo), "The schema should read from the worksheet."
     AssertEqual CStr(schema.AnchorColumnIndexes(1)), "1", "Column A should be the first anchor."
     AssertEqual CStr(schema.AnchorColumnIndexes(2)), "3", "Column C should remain an anchor across an empty header."
     AssertEqual CStr(schema.AnchorColumnIndexes(3)), "5", "Column E should remain an anchor."
     AssertEqual CStr(UBound(schema.AnchorColumnIndexes)), "3", "A product column after E must not extend the anchor set."
 
+    currentStep = "read value, font, and fill snapshot"
     AssertTrue ReadDeclaredSnapshot(handleId, targets, snapshot, errorInfo), "The physical snapshot should be read. " & errorInfo.Message
     AssertEqual CStr(snapshot.LastDataRow), "10", "The later row should define the boundary across an internal blank row."
     AssertTrue IsEmpty(snapshot.Values(3, 4)), "The internal blank row must retain its physical position."
     AssertEqual CStr(snapshot.Values(10, 4)), "VALUE_10", "The physical last row should remain addressable."
+    currentStep = "parse font runs"
+    AssertTrue ParseTextFontData(CStr(snapshot.Fonts(4, 4)), parsedKind, parsedText, runs, emptyCellFont, errorInfo), "The font snapshot should preserve localized character runs."
+    AssertEqual parsedText, "VALUE_4", "The font data must remain bound to the source string."
+    AssertTrue UBound(runs, 1) >= 2, "Distinct character formatting should produce separate runs."
+    AssertTrue CompareFormattingData(snapshot.Fills(4, 4), snapshot.Fills(4, 4), valid, errorInfo), "The fill snapshot should use the canonical format protocol."
     CopySnapshotSchema snapshot, expected
+    currentStep = "validate snapshot structure"
     AssertTrue ValidateStructure(handleId, expected, valid, errorInfo), "The fixture structure should validate."
     AssertTrue valid, "The unchanged product anchors should validate."
 
     anchorBefore = sheet.Cells(4, 1).Value2
     unselectedBefore = sheet.Cells(4, 2).Value2
     mergedValues = snapshot.Values
-    mergedValues(4, 4) = "LOCAL_UPDATE"
-    AssertTrue WriteDeclaredColumns(handleId, targets, mergedValues, errorInfo), "The declared AMG column should be written. " & errorInfo.Message
-    AssertEqual CStr(sheet.Cells(4, 4).Value2), "LOCAL_UPDATE", "The selected AMG cell should contain the merged value."
+    mergedFonts = snapshot.Fonts
+    mergedFills = snapshot.Fills
+    mergedValues(4, 4) = "LOCAL04"
+    currentStep = "prepare merged text and format data"
+    AssertTrue ParseTextFontData(CStr(mergedFonts(4, 4)), parsedKind, parsedText, runs, emptyCellFont, errorInfo), "The source font runs should parse before text replacement."
+    mergedFonts(4, 4) = BuildTextFontData(mergedValues(4, 4), runs, emptyCellFont, errorInfo2)
+    currentStep = "write and verify merged value and formats"
+    AssertTrue WriteDeclaredColumns(handleId, targets, mergedValues, mergedFonts, mergedFills, errorInfo), "The declared AMG value and formats should be written. " & errorInfo.Message & " " & errorInfo.Context
+    AssertEqual CStr(sheet.Cells(4, 4).Value2), "LOCAL04", "The selected AMG cell should contain the merged value."
+    AssertEqual CStr(sheet.Cells(4, 4).Characters(1, 1).Font.Color), CStr(RGB(255, 0, 0)), "The first localized font run should round-trip."
+    AssertEqual CStr(sheet.Cells(4, 4).Characters(4, 1).Font.Bold), "True", "The second localized font run should round-trip."
+    AssertEqual CStr(sheet.Cells(4, 4).Interior.Color), CStr(RGB(220, 230, 241)), "The direct fill should round-trip."
     AssertEqual CStr(sheet.Cells(4, 1).Value2), CStr(anchorBefore), "The product anchor must not be written."
     AssertEqual CStr(sheet.Cells(4, 2).Value2), CStr(unselectedBefore), "An undeclared AMG column must not be written."
 
+    currentStep = "reject invalid merged value"
     mergedValues(4, 4) = 7
-    AssertFalse WriteDeclaredColumns(handleId, targets, mergedValues, errorInfo), "A non-string merge value must be rejected before writing."
-    AssertEqual CStr(sheet.Cells(4, 4).Value2), "LOCAL_UPDATE", "Rejected output must leave the workbook value unchanged."
+    AssertFalse WriteDeclaredColumns(handleId, targets, mergedValues, mergedFonts, mergedFills, errorInfo), "A non-string merge value must be rejected before writing."
+    AssertEqual CStr(sheet.Cells(4, 4).Value2), "LOCAL04", "Rejected output must leave the workbook value unchanged."
 
+    currentStep = "validate anchor drift"
     sheet.Cells(4, 5).Value2 = "ANCHOR_CHANGED"
     AssertTrue ValidateStructure(handleId, expected, valid, errorInfo), "A changed anchor is a structure result, not a read failure."
     AssertFalse valid, "A changed product anchor must block a commit."
@@ -82,8 +116,10 @@ Private Sub TestPhysicalSnapshotsAndDeclaredWrite()
     Exit Sub
 
 Failed:
+    failureNumber = Err.Number
+    failureDescription = Err.Description
     If Len(handleId) > 0 Then CloseWorkbookHandle handleId, False
-    Err.Raise Err.Number, "TestMdlExcel.TestPhysicalSnapshotsAndDeclaredWrite", Err.Description
+    Err.Raise failureNumber, "TestMdlExcel.TestPhysicalSnapshotsAndDeclaredWrite", currentStep & ": " & failureDescription
 End Sub
 
 Private Sub TestOrphanAndInvalidEditableContent()

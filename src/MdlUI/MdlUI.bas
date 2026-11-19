@@ -229,12 +229,12 @@ Public Function BuildConflictChoiceMatrix(ByRef conflicts As Variant, ByRef sele
     choices = Empty
     On Error GoTo InvalidInput
     If Not GetMatrixBounds(conflicts, rowLow, rowHigh, columnLow, columnHigh) Then Exit Function
-    If columnHigh - columnLow + 1 <> 6 Then Exit Function
+    If columnHigh - columnLow + 1 <> 7 Then Exit Function
     If Not GetVectorBounds(selections, selectionLow, selectionHigh) Then Exit Function
     If rowHigh - rowLow <> selectionHigh - selectionLow Then Exit Function
 
     rowCount = rowHigh - rowLow + 1
-    ReDim result(1 To rowCount, 1 To 4)
+    ReDim result(1 To rowCount, 1 To 5)
     For rowIndex = rowLow To rowHigh
         selectionIndex = selectionLow + rowIndex - rowLow
         If VarType(conflicts(rowIndex, columnLow)) <> vbString Then Exit Function
@@ -242,12 +242,15 @@ Public Function BuildConflictChoiceMatrix(ByRef conflicts As Variant, ByRef sele
         If VarType(conflicts(rowIndex, columnLow + 2)) = vbString Or Not IsNumeric(conflicts(rowIndex, columnLow + 2)) Then Exit Function
         If CDbl(conflicts(rowIndex, columnLow + 1)) <> CDbl(CLng(conflicts(rowIndex, columnLow + 1))) Then Exit Function
         If CDbl(conflicts(rowIndex, columnLow + 2)) <> CDbl(CLng(conflicts(rowIndex, columnLow + 2))) Then Exit Function
+        If VarType(conflicts(rowIndex, columnLow + 3)) <> vbString Then Exit Function
+        If CStr(conflicts(rowIndex, columnLow + 3)) <> "TextFont" And CStr(conflicts(rowIndex, columnLow + 3)) <> "Fill" Then Exit Function
         If VarType(selections(selectionIndex)) <> vbString Then Exit Function
         If StrComp(CStr(selections(selectionIndex)), "Local", vbBinaryCompare) <> 0 And StrComp(CStr(selections(selectionIndex)), "Remote", vbBinaryCompare) <> 0 Then Exit Function
         result(rowIndex - rowLow + 1, 1) = CStr(conflicts(rowIndex, columnLow))
         result(rowIndex - rowLow + 1, 2) = conflicts(rowIndex, columnLow + 1)
         result(rowIndex - rowLow + 1, 3) = conflicts(rowIndex, columnLow + 2)
-        result(rowIndex - rowLow + 1, 4) = CStr(selections(selectionIndex))
+        result(rowIndex - rowLow + 1, 4) = CStr(conflicts(rowIndex, columnLow + 3))
+        result(rowIndex - rowLow + 1, 5) = CStr(selections(selectionIndex))
     Next rowIndex
 
     choices = result
@@ -284,6 +287,14 @@ Public Function FormatConflictValue(ByVal value As Variant) As String
     formatted = Replace$(CStr(value), vbCrLf, vbLf)
     formatted = Replace$(formatted, vbCr, vbLf)
     FormatConflictValue = formatted
+End Function
+
+Public Function FormatConflictComponent(ByVal componentName As String, ByVal value As Variant) As String
+    If componentName = "TextFont" Or componentName = "Fill" Then
+        FormatConflictComponent = FormatFormattingPreview(value)
+    Else
+        FormatConflictComponent = FormatConflictValue(value)
+    End If
 End Function
 
 Public Function ExcelColumnLabel(ByVal columnIndex As Long) As String
