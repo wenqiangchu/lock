@@ -12,6 +12,7 @@ workbooks while each edit session operates on one selected workbook.
 | `plans/PLAN.md` | Master plan: phases, milestones, status |
 | `plans/phase-NN-*.md` | Per-phase execution plans |
 | `docs/` | Background reference (not authoritative) |
+| `docs/current-user-flow.md` | Source-based walkthrough of current user and VBA behavior |
 | `prepare/` | Completed research from the preparation phase (read-only) |
 
 `plans/` is the single source of truth for what to build and in what order.
